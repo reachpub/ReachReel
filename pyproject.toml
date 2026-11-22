@@ -49,7 +49,7 @@ dependencies = [
 # Maintainer tooling: `uv pip install -e '.[dev]'`. apdev brings the shared
 # APCore checks (source charset, circular imports) and `apdev release`.
 dev = [
-  "apdev[dev]>=0.2.5",
+  "apdev[dev]>=0.2.6",
   "pre-commit>=3.5",
 ]
 
