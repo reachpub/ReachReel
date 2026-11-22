@@ -8,6 +8,7 @@
 
 - Representative-frame deduplication for the VLM stage: each extracted frame is thumbnailed to 16x16 grayscale and dropped when it barely differs from the last kept frame. New setting `vlm_frame_dedup` (default `4.0`, `0` disables) and `--vlm-dedup`; a static long shot now sends one frame instead of three, and the threshold is part of the VLM cache key.
 - CI runs the "no CJK in Python source" guard as its own step, so a violation reports the file and line instead of hiding inside the full test output.
+- Commit messages are now validated: `scripts/check_commit_messages.py` runs from `.githooks/commit-msg` (`git config core.hooksPath .githooks`) and in CI over every commit a push or pull request adds.
 - Unit tests for the mix filter graph: `mix_filter_graph()` now builds the ducking graph as a pure function, covered for narration-only, ambient-only, BGM-only, both side-chains, zero ambient volume, and duck-ratio clamping.
 - `tests/integration/test_scenes.py`: FFmpeg-only fixtures with known cut points (2 s / 4 s) for `detect_scenes`, no-audio / mono / 5.1 clips for `probe_video` channel reporting, and 90° / 180° / 270° clips for coded-vs-display dimensions.
 - `tests/integration/test_timeline.py`: covers the narration `atempo` fit path on real WAVs, and that a timeline that already fits is left untouched.

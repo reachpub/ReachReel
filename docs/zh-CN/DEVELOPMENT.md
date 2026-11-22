@@ -94,6 +94,7 @@ qa
 | `src/reachreel/media/render.py` | 缩放/帧率、硬字幕/软字幕、封装 | `render`, `subtitle_style` |
 | `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
+| `scripts/check_commit_messages.py` | Conventional Commits 校验器，git hook 与 CI 共用 | `validate`, `messages_in_range` |
 
 ---
 
@@ -648,11 +649,32 @@ uv pip install --python .venv/bin/python -e .
 source .venv/bin/activate
 
 reachreel doctor
-uvx ruff check src/reachreel tests
+uvx ruff check src/reachreel tests scripts
 python -m unittest discover -s tests -v
+
+git config core.hooksPath .githooks   # 启用 commit-msg hook
 ```
 
 开发环境必须是 Apple Silicon 上的 macOS。`reachreel doctor` 在 Intel macOS、Linux、Windows 上会让 `平台` 这项失败，因为 MLX 没有 x86_64 macOS 构建。
+
+### 提交信息
+
+提交信息按 `AGENTS.md` 的约定使用英文 Conventional Commits：
+
+```text
+feat(media): add scene-aware frame selection
+fix: handle an empty scene list
+refactor(core)!: drop python 3.10
+```
+
+头部格式为 `type(scope): subject`（`scope` 可省略，`!` 表示破坏性变更），`type` 取值 `build chore ci docs feat fix perf refactor revert style test`，整行不超过 72 字符，结尾不加句号，正文前必须空一行。Git 自动生成的 `Merge` / `Revert` / `fixup!` 主题放行。
+
+`scripts/check_commit_messages.py` 在两个地方执行规则：
+
+- 本地：`.githooks/commit-msg`，每个 clone 执行一次 `git config core.hooksPath .githooks` 即可生效；
+- CI：检查本次 push 或 PR 新增的提交（PR 用 `origin/<base>..HEAD`）。
+
+`tests/unit/test_commit_messages.py` 覆盖校验器，其中一条断言 hook 保持可执行权限。
 
 ### 合成测试素材
 

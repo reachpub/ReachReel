@@ -21,6 +21,9 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Commit-message checks need the actual history of the PR or push.
+          fetch-depth: 0
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -38,7 +41,23 @@ jobs:
         run: uv pip install --python .venv/bin/python 'platformdirs>=4.0'
 
       - name: Lint
-        run: uvx ruff@0.17.6 check src/reachreel tests
+        run: uvx ruff@0.17.6 check src/reachreel tests scripts
+
+      - name: Commit messages
+        # Conventional Commits in English, as declared in AGENTS.md.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            RANGE="origin/$BASE_REF..HEAD"
+          else
+            RANGE="$BEFORE_SHA..$HEAD_SHA"
+          fi
+          echo "Checking commit messages in $RANGE"
+          python3 scripts/check_commit_messages.py --range "$RANGE"
 
       - name: Language gate (no CJK in Python source)
         # Localized copy lives in locales/*.toml and prompts/*.toml only. Running

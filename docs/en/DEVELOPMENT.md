@@ -94,6 +94,7 @@ qa
 | `src/reachreel/media/render.py` | Scaling/frame rate, burned-in/soft subtitles, muxing | `render`, `subtitle_style` |
 | `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
+| `scripts/check_commit_messages.py` | Conventional Commits validator shared by the git hook and CI | `validate`, `messages_in_range` |
 
 ---
 
@@ -648,11 +649,32 @@ uv pip install --python .venv/bin/python -e .
 source .venv/bin/activate
 
 reachreel doctor
-uvx ruff check src/reachreel tests
+uvx ruff check src/reachreel tests scripts
 python -m unittest discover -s tests -v
+
+git config core.hooksPath .githooks   # enables the commit-msg hook
 ```
 
 Development requires macOS on Apple silicon. `reachreel doctor` reports a failing `Platform` check on Intel macOS, Linux, and Windows, because MLX ships no x86_64 macOS build.
+
+### Commit messages
+
+Commits follow Conventional Commits in English, exactly as declared in `AGENTS.md`:
+
+```text
+feat(media): add scene-aware frame selection
+fix: handle an empty scene list
+refactor(core)!: drop python 3.10
+```
+
+The header is `type(scope): subject` (`scope` optional, `!` marks a breaking change) with `type` in `build chore ci docs feat fix perf refactor revert style test`, a 72-character limit, no trailing period, and a blank second line before the body. Merge/revert/fixup subjects that Git generates are accepted as-is.
+
+`scripts/check_commit_messages.py` enforces the rule in two places:
+
+- locally, through `.githooks/commit-msg`; enable it once per clone with `git config core.hooksPath .githooks`;
+- in CI, over the commits a push or pull request adds (`origin/<base>..HEAD` for pull requests).
+
+`tests/unit/test_commit_messages.py` covers the validator, including that the hook stays executable.
 
 ### Synthetic test footage
 
@@ -738,7 +760,7 @@ Done: scene detection fixtures, the mix filter graph, manifest `render_settings`
 
 ## 12. Release checklist
 
-- [ ] `uvx ruff check src/reachreel tests` passes;
+- [ ] `uvx ruff check src/reachreel tests scripts` passes;
 - [ ] `python -m unittest discover -s tests` passes;
 - [ ] `reachreel doctor` passes;
 - [ ] Run once with one landscape and one portrait clip;

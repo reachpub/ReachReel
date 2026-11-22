@@ -63,8 +63,11 @@ python3.12 -m venv .venv
 uv pip install --python .venv/bin/python -e .
 
 # Quality gates
-uvx ruff check src/reachreel tests
+uvx ruff check src/reachreel tests scripts
 .venv/bin/python -m unittest discover -s tests -v
+
+# Commit-message hook (once per clone)
+git config core.hooksPath .githooks
 
 # Environment check
 .venv/bin/reachreel doctor
@@ -138,3 +141,4 @@ The installed command is `reachreel`.
   - `feat(media): add scene-aware frame selection`
   - `docs(i18n): add English user guide`
   - `chore(ci): run ruff and unit tests`
+- The format is enforced by `scripts/check_commit_messages.py`: locally through `.githooks/commit-msg` and in CI over the commits a push or pull request adds. Header is `type(scope): subject` (scope optional, `!` for a breaking change), at most 72 characters, no trailing period, English only.

@@ -8,6 +8,7 @@
 
 - VLM 阶段的代表帧去重：每帧降采样成 16×16 灰度缩略图，与上一张保留帧区别过小就丢弃。新增配置 `vlm_frame_dedup`（默认 `4.0`，`0` 关闭）与 `--vlm-dedup`；静态长镜头现在只送 1 张而不是 3 张，阈值也计入 VLM 缓存 key。
 - CI 把「Python 源码无 CJK」检查拆成独立步骤，违规时直接给出文件与行号，而不是埋在完整测试输出里。
+- 新增提交信息校验：`scripts/check_commit_messages.py` 通过 `.githooks/commit-msg`（`git config core.hooksPath .githooks`）与 CI 两条路径执行，检查 push 或 PR 新增的每个提交。
 - 混音 filter graph 单元测试：`mix_filter_graph()` 抽成纯函数构造侧链图，覆盖仅旁白、仅环境音、仅 BGM、双路侧链、环境音音量为 0、压低比上下限。
 - `tests/integration/test_scenes.py`：只依赖 FFmpeg 的 fixture，三色片段带 2s / 4s 已知切点用于 `detect_scenes`，另有无音轨 / 单声道 / 5.1 片段断言 `probe_video` 的声道数，以及 90° / 180° / 270° 片段断言编码尺寸与显示尺寸。
 - `tests/integration/test_timeline.py`：覆盖真实 WAV 上的旁白 `atempo` 适配，以及本来就能放下的时间轴不被改动。

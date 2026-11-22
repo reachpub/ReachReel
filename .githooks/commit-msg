@@ -1,0 +1,4 @@
+#!/bin/sh
+# Reject commit messages that break the Conventional Commits rule in AGENTS.md.
+# Enable once per clone: git config core.hooksPath .githooks
+exec python3 "$(git rev-parse --show-toplevel)/scripts/check_commit_messages.py" --file "$1"
