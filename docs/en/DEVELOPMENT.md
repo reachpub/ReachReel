@@ -685,6 +685,22 @@ Tags use a `v` prefix (`v0.3.0`).
 
 **Cadence**: release when a version is worth announcing, not per commit. One release per day is the ceiling, and it should carry a meaningful iteration — a new capability, a user-visible behaviour change, or a batch of fixes worth a version number. Documentation, CI and tooling changes accumulate in `[Unreleased]` until the next real release.
 
+### Publishing to PyPI
+
+`pyproject.toml` declares `[tool.apdev] pypi_repository = "reachreel"`, so `apdev release` uploads with `twine upload -r reachreel dist/*` and uses the `[reachreel]` section of `~/.pypirc`. Resolution order is `--repository NAME`, `PYPI_REPOSITORY`, `[tool.apdev]`, then the default `pypi` section; the release header prints the resolved section before anything is uploaded, so a second PyPI account is never a guess.
+
+Requirements:
+
+- `apdev >= 0.2.6`; older versions ignore the key and silently use `[pypi]`;
+- a `[reachreel]` section holding a PyPI API token;
+- the token must belong to the account that should own the project, because the first successful upload decides ownership. Create an account-wide token for that first upload, then replace it with a project-scoped token for `reachreel`.
+
+Manual fallback, useful with an older `apdev` or for a one-off upload:
+
+```bash
+TWINE_REPOSITORY=reachreel uvx twine upload dist/*
+```
+
 **Retroactive tags** are only for versions that predate tagging; `apdev release` cannot create them, so do it by hand and label it:
 
 ```bash

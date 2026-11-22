@@ -69,6 +69,8 @@ packages = ["src/reachreel"]
 [tool.apdev]
 base_package = "reachreel"
 src_dir = "src"
+# Named ~/.pypirc section for `apdev release` (needs apdev >= 0.2.6).
+pypi_repository = "reachreel"
 
 [tool.ruff]
 target-version = "py311"

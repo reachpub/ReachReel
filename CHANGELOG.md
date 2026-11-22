@@ -6,6 +6,7 @@
 
 ### Added
 
+- `[tool.apdev] pypi_repository = "reachreel"` selects the `[reachreel]` section of `~/.pypirc` for `apdev release`, so this project's uploads use its own PyPI account while the other repositories keep the default section. Requires `apdev >= 0.2.6`; DEVELOPMENT documents the resolution order, the first-upload ownership rule, and the `TWINE_REPOSITORY` fallback.
 - PyPI-facing project metadata in `pyproject.toml`: `Project-URL` entries (homepage, repository, documentation, changelog, issues), eleven Trove classifiers, keywords, and the author. `twine check` passes for the wheel and the sdist, the licence renders through PEP 639 (`License-Expression: Apache-2.0` plus `License-File: LICENSE`/`NOTICE`), and the build emits Metadata-Version 2.5.
 
 ### Fixed

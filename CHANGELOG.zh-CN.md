@@ -6,6 +6,7 @@
 
 ### 新增
 
+- `[tool.apdev] pypi_repository = "reachreel"` 让 `apdev release` 使用 `~/.pypirc` 的 `[reachreel]` 段：本项目走自己的 PyPI 账号，其他仓库继续用默认段。需要 `apdev >= 0.2.6`；DEVELOPMENT 里写清了优先级、首次上传决定归属，以及 `TWINE_REPOSITORY` 兜底方式。
 - `pyproject.toml` 补齐 PyPI 页面所需元数据：`Project-URL`（主页、仓库、文档、变更记录、Issues）、11 条 Trove 分类、关键词与作者。`twine check` 对 wheel 与 sdist 均通过；许可证按 PEP 639 渲染（`License-Expression: Apache-2.0` 与 `License-File: LICENSE`/`NOTICE`），构建元数据版本为 2.5。
 
 ### 修复

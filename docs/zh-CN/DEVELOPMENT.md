@@ -685,6 +685,22 @@ tag 采用 `v` 前缀（`v0.3.0`）。
 
 **节奏**：值得对外宣布时才发版，不要每个提交都发。上限是一天一次，并且要带一次有意义的迭代——新能力、用户可见的行为变化，或一批值得单独给版本号的修复。文档、CI、工具类改动先积攒在 `[Unreleased]`，等下一次真正的发布。
 
+### 发布到 PyPI
+
+`pyproject.toml` 里声明了 `[tool.apdev] pypi_repository = "reachreel"`，因此 `apdev release` 会用 `twine upload -r reachreel dist/*`，走 `~/.pypirc` 的 `[reachreel]` 段。优先级为 `--repository NAME` → `PYPI_REPOSITORY` → `[tool.apdev]` → 默认 `pypi` 段；发版脚本会在上传前把最终使用的段打印在头部，第二个 PyPI 账号不再靠记忆。
+
+前提：
+
+- `apdev >= 0.2.6`；更旧的版本会忽略这个键并静默使用 `[pypi]`；
+- `~/.pypirc` 里有 `[reachreel]` 段并填入 PyPI API token；
+- token 必须属于「应该拥有该项目」的账号，因为**首次上传决定项目归属**。首次上传用账号级 token，项目建好后换成只授权 `reachreel` 的项目级 token。
+
+手工兜底（旧版 `apdev` 或临时上传时用）：
+
+```bash
+TWINE_REPOSITORY=reachreel uvx twine upload dist/*
+```
+
 **补打历史 tag** 只适用于「当时没打 tag」的旧版本；`apdev release` 无法回补，需要手工做并明确标注：
 
 ```bash
