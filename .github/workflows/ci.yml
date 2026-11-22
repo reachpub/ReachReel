@@ -21,6 +21,8 @@ jobs:
           # Commit-message checks need the history this push or PR adds.
           fetch-depth: 0
 
+      - uses: astral-sh/setup-uv@v5
+
       - name: Commit messages
         # Conventional Commits in English, as declared in AGENTS.md.
         env:
