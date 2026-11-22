@@ -683,6 +683,22 @@ apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel
 
 Tags use a `v` prefix (`v0.3.0`).
 
+**Cadence**: release when a version is worth announcing, not per commit. One release per day is the ceiling, and it should carry a meaningful iteration — a new capability, a user-visible behaviour change, or a batch of fixes worth a version number. Documentation, CI and tooling changes accumulate in `[Unreleased]` until the next real release.
+
+**Retroactive tags** are only for versions that predate tagging; `apdev release` cannot create them, so do it by hand and label it:
+
+```bash
+git worktree add --detach /tmp/v0.2.0 c9c3652
+(cd /tmp/v0.2.0 && uv build)
+git tag -a v0.2.0 c9c3652 -m "ReachReel 0.2.0 (retroactive tag)"
+git push origin v0.2.0
+gh release create v0.2.0 --verify-tag --latest=false \
+  --title "ReachReel 0.2.0 (retroactive)" \
+  --notes-file /tmp/notes.md /tmp/v0.2.0/dist/*
+```
+
+Put "retroactive" in the title and in the first line of the notes, and say that the artifacts were built afterwards, so nobody mistakes it for a release that was announced at the time.
+
 ### Commit messages
 
 Commits follow Conventional Commits in English, exactly as declared in `AGENTS.md`:

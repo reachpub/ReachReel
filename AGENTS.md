@@ -145,6 +145,7 @@ The installed command is `reachreel`.
 - Prefer the existing seam over a new abstraction. A new module needs one written sentence explaining why the current model cannot express the change.
 - Do not rename files, modules, CLI flags, environment variables, or manifest fields silently. Add a migration note and update the docs in the same change.
 - Do not rewrite pushed history. Do not commit secrets. Do not run destructive git commands without explicit confirmation.
+- Release only what is worth announcing: at most one release per day, and only for a meaningful iteration. Docs, CI and tooling accumulate in `[Unreleased]`; retroactive tags must say "retroactive" in the tag message, the release title, and the first line of the notes.
 - Use Conventional Commits in English, for example:
   - `refactor(package): move reachreel to src layout`
   - `feat(media): add scene-aware frame selection`

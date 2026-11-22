@@ -20,6 +20,8 @@
 - `tests/integration/test_smoke.py::OnlyReuseTest`：用产物哈希断言 `run --only tts`、`--only mix,render`、`--only qa` 都不会重跑前面的阶段。
 - 时间轴边界单元测试：空列表、无场景、未知场景 id、旁白超长告警、以及片段短于 `tail_padding` 的情况。
 
+- 补打 `v0.1.0`（`b8a60ae`）与 `v0.2.0`（`c9c3652`）两个 tag，并各建一个 GitHub release，附上从对应提交构建的 wheel 与 sdist。两者都标注为 retroactive，因为当时既没打 tag 也没对外发布过。
+
 ### 变更
 
 - 硬字幕默认改为白字 + 黑描边 + 轻微阴影（`BorderStyle=1`，`subtitle_render = "outline"`），不再使用遮住大片画面的半透明黑底色块。描边宽度约为 `subtitle_size` 的 6%，可用 `subtitle_outline` / `--subtitle-outline` 覆盖。

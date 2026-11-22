@@ -20,6 +20,8 @@
 - `tests/integration/test_smoke.py::OnlyReuseTest`: `run --only tts`, `--only mix,render`, and `--only qa` are asserted not to redo earlier stages, using artifact hashes.
 - Unit tests for timeline boundaries: empty list, no scenes, unknown scene id, overlong narration warning, and clips shorter than `tail_padding`.
 
+- Retroactive `v0.1.0` (`b8a60ae`) and `v0.2.0` (`c9c3652`) tags, each with a GitHub release whose wheel and sdist were built from the tagged commit. Both are labelled retroactive because neither version had ever been tagged or announced.
+
 ### Changed
 
 - Hard subtitles now default to white text with a black outline and a soft shadow (`BorderStyle=1`, `subtitle_render = "outline"`), instead of the translucent black box that hid a large part of the frame. The stroke is about 6% of `subtitle_size` and can be overridden with `subtitle_outline` / `--subtitle-outline`.

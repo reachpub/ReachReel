@@ -683,6 +683,22 @@ apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel
 
 tag 采用 `v` 前缀（`v0.3.0`）。
 
+**节奏**：值得对外宣布时才发版，不要每个提交都发。上限是一天一次，并且要带一次有意义的迭代——新能力、用户可见的行为变化，或一批值得单独给版本号的修复。文档、CI、工具类改动先积攒在 `[Unreleased]`，等下一次真正的发布。
+
+**补打历史 tag** 只适用于「当时没打 tag」的旧版本；`apdev release` 无法回补，需要手工做并明确标注：
+
+```bash
+git worktree add --detach /tmp/v0.2.0 c9c3652
+(cd /tmp/v0.2.0 && uv build)
+git tag -a v0.2.0 c9c3652 -m "ReachReel 0.2.0 (retroactive tag)"
+git push origin v0.2.0
+gh release create v0.2.0 --verify-tag --latest=false \
+  --title "ReachReel 0.2.0 (retroactive)" \
+  --notes-file /tmp/notes.md /tmp/v0.2.0/dist/*
+```
+
+标题和 notes 首行都要写「retroactive」，并说明产物是事后构建的，避免被误认为当时正式发布过。
+
 ### 提交信息
 
 提交信息按 `AGENTS.md` 的约定使用英文 Conventional Commits：
