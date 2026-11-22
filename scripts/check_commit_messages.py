@@ -2,7 +2,7 @@
 
 Two entry points share the same rules:
 
-- ``--file`` is what the local ``.githooks/commit-msg`` hook calls;
+- ``--file`` is what the local ``commit-message`` pre-commit hook calls;
 - ``--range`` is what CI calls on the commits a push or pull request adds.
 
 Kept as a standalone script instead of a runtime module because it is

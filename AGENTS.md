@@ -74,8 +74,8 @@ python3 scripts/check_config_docs.py
 apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel -name '*.py')
 apdev check-imports
 
-# Commit-message hook (once per clone)
-git config core.hooksPath .githooks
+# Local hooks (once per clone)
+pre-commit install
 
 # Environment check
 .venv/bin/reachreel doctor
@@ -151,4 +151,4 @@ The installed command is `reachreel`.
   - `docs(i18n): add English user guide`
   - `chore(ci): run ruff and unit tests`
 - Changelog parity is enforced by `scripts/check_changelog.py` in CI: same version headings, same sections (English file in English, Chinese file in Chinese); a section that is empty in one language fails, and a bullet-count drift is only a warning unless `--strict` is passed.
-- The format is enforced by `scripts/check_commit_messages.py`: locally through `.githooks/commit-msg` and in CI over the commits a push or pull request adds. Header is `type(scope): subject` (scope optional, `!` for a breaking change), at most 72 characters, no trailing period, English only.
+- The format is enforced by `scripts/check_commit_messages.py`: locally through the `commit-message` pre-commit hook and in CI over the commits a push or pull request adds. Header is `type(scope): subject` (scope optional, `!` for a breaking change), at most 72 characters, no trailing period, English only.

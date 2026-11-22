@@ -94,7 +94,7 @@ qa
 | `src/reachreel/media/render.py` | 缩放/帧率、硬字幕/软字幕、封装 | `render`, `subtitle_style` |
 | `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
-| `scripts/check_commit_messages.py` | Conventional Commits 校验器，git hook 与 CI 共用 | `validate`, `messages_in_range` |
+| `scripts/check_commit_messages.py` | Conventional Commits 校验器，pre-commit hook 与 CI 共用 | `validate`, `messages_in_range` |
 | `scripts/apdev_charset.json` | `apdev check-chars` 的字符集：ASCII + emoji + CJK 标点，汉字仍然非法 | — |
 | `scripts/check_config_docs.py` | 配置项三处一致：`Settings` ↔ `config.example.toml` ↔ 两份 `CONFIGURATION.md` | `settings_fields`, `compare` |
 | `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` 结构一致性 | `parse`, `compare`, `main` |
@@ -655,7 +655,7 @@ reachreel doctor
 uvx ruff check src/reachreel tests scripts
 python -m unittest discover -s tests -v
 
-git config core.hooksPath .githooks   # 启用 commit-msg hook
+pre-commit install                    # 安装 pre-commit 与 commit-msg 两个 hook
 ```
 
 开发环境必须是 Apple Silicon 上的 macOS。`reachreel doctor` 在 Intel macOS、Linux、Windows 上会让 `平台` 这项失败，因为 MLX 没有 x86_64 macOS 构建。
@@ -697,7 +697,7 @@ refactor(core)!: drop python 3.10
 
 `scripts/check_commit_messages.py` 在两个地方执行规则：
 
-- 本地：`.githooks/commit-msg`，每个 clone 执行一次 `git config core.hooksPath .githooks` 即可生效；
+- 本地：`.pre-commit-config.yaml` 里的 `commit-message` hook（`pre-commit install`）；
 - CI：检查本次 push 或 PR 新增的提交（PR 用 `origin/<base>..HEAD`）。
 
 `tests/unit/test_commit_messages.py` 覆盖校验器，其中一条断言 hook 保持可执行权限。
@@ -706,7 +706,6 @@ refactor(core)!: drop python 3.10
 
 - 反引号与代码块里的 CJK 放行，因为「引用所描述的语言」不等于中文提交信息：`docs: document the `新增` heading` 可以通过；
 - `Merge`、`Revert "`、`fixup!`、`squash!`、`amend!` 这类 Git 生成主题直接放行；
-- 机器上没有 `python3` 时，hook 只打印警告并放行；
 - `git commit --no-verify` 仍可跳过所有本地 hook，CI 也只检查本次 push 或 PR 新增的提交。
 
 ### 变更记录一致性
@@ -719,6 +718,24 @@ refactor(core)!: drop python 3.10
 - 某章节在一侧有条目、另一侧为空会失败；条目数不一致只打印警告，因为一条长英文条目合理地可以拆成两条中文。`--strict` 会把条目数升级为错误，用于发布检查。
 
 新增章节标题需要在脚本的 `SECTIONS` 里登记，检查会打印违规标题与期望译名。`tests/unit/test_changelog_sync.py` 覆盖全部规则以及仓库里真实的这对文件。
+
+### 本地 hook
+
+`.pre-commit-config.yaml` 对每个 CI 检查做本地镜像，push 之前就能发现：
+
+| Hook | 对应 CI 检查 |
+|---|---|
+| `apdev check-imports` | 依赖方向无环 |
+| `apdev check-chars`（`scripts/apdev_charset.json`，`src/reachreel/**.py`） | Python 源码英文 |
+| `ruff` | lint job |
+| `commit-message`（commit-msg 阶段） | `scripts/check_commit_messages.py` |
+
+```bash
+uv pip install --python .venv/bin/python -e '.[dev]'
+pre-commit install          # 通过 default_install_hook_types 安装两个阶段
+```
+
+用过旧 `.githooks` 目录的 clone 需要执行一次 `git config --unset core.hooksPath`，否则 `core.hooksPath` 会让 Git 读不到 `.git/hooks`。`git commit --no-verify` 仍可绕过，CI 依旧是最终权威。
 
 ### 配置项一致性
 

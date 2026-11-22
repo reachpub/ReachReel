@@ -1,0 +1,40 @@
+# Local hook stack. One-time setup per clone:
+#   uv pip install --python .venv/bin/python -e '.[dev]'
+#   pre-commit install          # installs both hook types via default_install_hook_types
+#   git config --unset core.hooksPath   # only if an older clone used .githooks
+#
+# Every hook mirrors a CI step in .github/workflows/ci.yml.
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: local
+    hooks:
+      - id: apdev-check-imports
+        name: apdev check-imports
+        entry: apdev check-imports
+        language: python
+        additional_dependencies: ["apdev==0.2.5"]
+        pass_filenames: false
+        always_run: true
+
+      - id: apdev-check-chars
+        name: apdev check-chars (Python sources)
+        # ASCII + emoji + CJK punctuation; ideographs stay illegal. Test
+        # fixtures are excluded because they contain Chinese on purpose.
+        entry: apdev check-chars --charset-file scripts/apdev_charset.json
+        language: python
+        additional_dependencies: ["apdev==0.2.5"]
+        files: ^src/reachreel/.*\.py$
+
+      - id: commit-message
+        name: commit message format
+        entry: python3 scripts/check_commit_messages.py --file
+        language: system
+        stages: [commit-msg]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.6
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(src/reachreel|tests|scripts)/

@@ -94,7 +94,7 @@ qa
 | `src/reachreel/media/render.py` | Scaling/frame rate, burned-in/soft subtitles, muxing | `render`, `subtitle_style` |
 | `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
-| `scripts/check_commit_messages.py` | Conventional Commits validator shared by the git hook and CI | `validate`, `messages_in_range` |
+| `scripts/check_commit_messages.py` | Conventional Commits validator shared by the pre-commit hook and CI | `validate`, `messages_in_range` |
 | `scripts/apdev_charset.json` | Charset for `apdev check-chars`: ASCII + emoji + CJK punctuation, Chinese ideographs illegal | — |
 | `scripts/check_config_docs.py` | Configuration surface: `Settings` ↔ `config.example.toml` ↔ both `CONFIGURATION.md` | `settings_fields`, `compare` |
 | `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` structural parity | `parse`, `compare`, `main` |
@@ -655,7 +655,7 @@ reachreel doctor
 uvx ruff check src/reachreel tests scripts
 python -m unittest discover -s tests -v
 
-git config core.hooksPath .githooks   # enables the commit-msg hook
+pre-commit install                    # installs the pre-commit and commit-msg hooks
 ```
 
 Development requires macOS on Apple silicon. `reachreel doctor` reports a failing `Platform` check on Intel macOS, Linux, and Windows, because MLX ships no x86_64 macOS build.
@@ -697,7 +697,7 @@ The header is `type(scope): subject` (`scope` optional, `!` marks a breaking cha
 
 `scripts/check_commit_messages.py` enforces the rule in two places:
 
-- locally, through `.githooks/commit-msg`; enable it once per clone with `git config core.hooksPath .githooks`;
+- locally, through the `commit-message` hook in `.pre-commit-config.yaml` (`pre-commit install`);
 - in CI, over the commits a push or pull request adds (`origin/<base>..HEAD` for pull requests).
 
 `tests/unit/test_commit_messages.py` covers the validator, including that the hook stays executable.
@@ -706,7 +706,6 @@ Escape hatches, so the rule never blocks ordinary work:
 
 - CJK is allowed inside backticks and fenced blocks, because quoting the language a document is about is not a Chinese commit message: `docs: document the `新增` heading` passes;
 - `Merge`, `Revert "`, `fixup!`, `squash!`, `amend!` subjects are accepted as generated;
-- when `python3` is missing the hook prints a warning and lets the commit through;
 - `git commit --no-verify` still skips every local hook, and CI only inspects the commits a push or pull request adds.
 
 ### Changelog parity
@@ -719,6 +718,24 @@ Escape hatches, so the rule never blocks ordinary work:
 - a section that has bullets in one language and none in the other fails; a count mismatch only prints a warning, because one long English bullet legitimately becomes two Chinese ones. `--strict` turns the counts into errors for a release check.
 
 A new section heading must be registered in `SECTIONS` inside the script; the check prints the exact heading and the expected translation. `tests/unit/test_changelog_sync.py` covers every rule plus the real repository pair.
+
+### Local hooks
+
+`.pre-commit-config.yaml` mirrors the CI checks so mistakes surface before a push:
+
+| Hook | Mirrors |
+|---|---|
+| `apdev check-imports` | the acyclic dependency rule |
+| `apdev check-chars` (`scripts/apdev_charset.json`, `src/reachreel/**.py`) | Python sources are English |
+| `ruff` | the lint job |
+| `commit-message` (commit-msg stage) | `scripts/check_commit_messages.py` |
+
+```bash
+uv pip install --python .venv/bin/python -e '.[dev]'
+pre-commit install          # both stages, via default_install_hook_types
+```
+
+Clones that used the older `.githooks` directory must run `git config --unset core.hooksPath` once, otherwise `core.hooksPath` keeps Git from reading `.git/hooks`. `git commit --no-verify` still bypasses everything, and CI remains authoritative.
 
 ### Configuration surface
 

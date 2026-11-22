@@ -1,4 +1,3 @@
-import os
 import shutil
 import unittest
 from pathlib import Path
@@ -67,14 +66,18 @@ class CommitMessageTests(unittest.TestCase):
     def test_range_of_a_single_commit(self):
         self.assertEqual(messages_in_range("HEAD..HEAD"), [])
 
-    def test_hook_is_executable_and_wired(self):
-        hook = PROJECT_ROOT / ".githooks" / "commit-msg"
-        self.assertTrue(hook.is_file())
-        self.assertTrue(os.access(hook, os.X_OK), "the commit-msg hook must be executable")
-        text = hook.read_text(encoding="utf-8")
-        self.assertIn("check_commit_messages.py", text)
-        # A contributor without python3 must not be blocked by the hook.
-        self.assertIn("command -v python3", text)
+    def test_pre_commit_config_wires_the_hooks(self):
+        config = (PROJECT_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8")
+        # Commit-message gate runs from the commit-msg stage.
+        self.assertIn("scripts/check_commit_messages.py", config)
+        self.assertIn("stages: [commit-msg]", config)
+        self.assertIn("default_install_hook_types: [pre-commit, commit-msg]", config)
+        # Both CI convention checks are mirrored locally.
+        self.assertIn("apdev check-imports", config)
+        self.assertIn("scripts/apdev_charset.json", config)
+        # Every hook calls a script that exists.
+        for script in ("scripts/check_commit_messages.py", "scripts/apdev_charset.json"):
+            self.assertTrue((PROJECT_ROOT / script).is_file(), script)
 
     def test_cli_reports_failures(self):
         from scripts.check_commit_messages import main
