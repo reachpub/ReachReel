@@ -233,6 +233,9 @@ qa
     "output_fps": 30,
     "crf": 20,
     "subtitle_size": 56,
+    "subtitle_render": "outline",
+    "subtitle_outline": 0.0,
+    "subtitle_box_padding": 0.0,
     "subtitle_size_unit": "px",
     "subtitle_layout": "ass",
     "subtitle_max_chars": 14,
@@ -444,6 +447,16 @@ factor = clamp(factor, 1.0, max_speedup)
 5. 生成 SRT。
 
 关键点：
+
+**样式**（`subtitles.subtitle_border`、`subtitle_render`）：
+
+- `outline`（默认）：`BorderStyle=1`，白色填充、黑色描边色，描边宽度取 `subtitle_outline`，未设置时约为 `subtitle_size` 的 6%，另加轻微阴影。描边只覆盖笔画边缘，字后画面仍然可见；
+- `box`：`BorderStyle=3`，旧的半透明黑底色块（`BackColour=&H80000000`），内边距为 `height / 288`，设置了 `subtitle_box_padding` 时以它为准；
+- `none`：`BorderStyle=1` 且 `Outline=0`、`Shadow=0`，即纯白字、无描边。
+
+因为 `PlayResX/Y` 等于输出分辨率且 `ScaledBorderAndShadow: yes`，描边宽度就是真实像素。
+
+其他关键点：
 
 - 不使用 ASR 文字，避免同音错字；
 - 不会丢字：`_cue_texts` 保证所有字符进入某条字幕；

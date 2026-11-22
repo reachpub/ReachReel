@@ -152,6 +152,9 @@ Kokoro 中文音色：
 | `subtitle_font` | `PingFang SC` | 字体 |
 | `subtitle_size` | `48` | 字幕字号（输出像素） |
 | `subtitle_preset` | `""` | 平台安全区预设：`douyin` / `reels` / `shorts` / `landscape` |
+| `subtitle_render` | `outline` | `outline`：白字 + 黑描边 + 轻微阴影，只盖住笔画边缘；`box`：半透明黑底色块（旧行为，遮挡更多画面）；`none`：纯白字，无描边无阴影（亮画面容易被吃掉） |
+| `subtitle_outline` | `0.0` | 描边宽度（输出像素），仅 `outline` 模式；`0` 表示自动，约为 `subtitle_size` 的 6% |
+| `subtitle_box_padding` | `0.0` | 文字四周内边距（输出像素），仅 `box` 模式；`0` 表示自动，1920 高时约 6.7 px |
 | `subtitle_margin_v` | `36` | 底部安全边距（输出像素） |
 | `subtitle_margin_left` | `50` | 左侧安全边距（输出像素） |
 | `subtitle_margin_right` | `50` | 右侧安全边距（输出像素） |
@@ -172,6 +175,18 @@ subtitle_preset = "douyin"   # douyin | reels | shorts | landscape
 | `landscape` | 40 | 60 | 60 |
 
 保持 `subtitle_preset = ""` 即可手动调 `subtitle_margin_*`。
+
+### 字幕样式
+
+默认就是主流平台的做法：白色字、黑色描边、轻微阴影，没有底色块，对画面遮挡最少：
+
+```toml
+subtitle_render = "outline"   # outline | box | none
+subtitle_outline = 0.0        # 0 表示自动，约为 subtitle_size 的 6%（outline 模式）
+subtitle_box_padding = 0.0    # 0 表示自动，1920 高时约 6.7 px（box 模式）
+```
+
+`subtitle_render = "box"` 恢复旧的半透明黑底色块，内边距随输出高度缩放（1920 高时约 6.7 px），可用 `subtitle_box_padding` 固定。`subtitle_render = "none"` 是纯白字：只有字幕所在区域整体偏暗时才建议使用。已有工作目录会沿用 `manifest.json` → `render_settings` 里记录的值；想复现旧观感时在 `render` 上传 `--subtitle-render box`：
 
 竖屏建议：
 
@@ -384,6 +399,9 @@ subtitle_max_lines = 2
 subtitle_max_seconds = 6.0
 subtitle_font = "PingFang SC"
 subtitle_size = 48
+subtitle_render = "outline"  # outline | box | none
+subtitle_outline = 0.0       # 0 = auto（outline 模式）
+subtitle_box_padding = 0.0   # 0 = auto（box 模式）
 subtitle_preset = ""
 subtitle_margin_v = 60
 subtitle_margin_left = 50

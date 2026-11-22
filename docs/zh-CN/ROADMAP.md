@@ -231,6 +231,7 @@ Windows/桌面端待做：
 ### P1-5 字幕升级
 
 - 已完成：竖屏/横屏安全区预设（`subtitle_preset`）；
+- 已完成：默认改为白字 + 黑描边（`subtitle_render = "outline"`、`subtitle_outline`），旧的半透明底色块保留为 `box`（可配 `subtitle_box_padding`），另提供纯白字 `none`；
 - 逐字/逐词高亮（卡拉 OK）；
 - 双语字幕；
 - 字幕模板：底部条、顶部标题、人物名牌；

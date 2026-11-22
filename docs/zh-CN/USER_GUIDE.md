@@ -267,6 +267,9 @@ reachreel run VIDEO [options]
 | `--subtitle-size N` | `48` | 字幕字号（输出像素） |
 | `--subtitle-chars N` | `18` | 每行最多字数 |
 | `--subtitle-preset NAME` | 空 | `douyin` / `reels` / `shorts` / `landscape` 安全区预设，覆盖边距 |
+| `--subtitle-render MODE` | `outline` | `outline`：白字 + 黑描边 + 轻微阴影；`box`：半透明黑底色块（旧观感，遮挡更多画面）；`none`：纯白字 |
+| `--subtitle-outline X` | `0` | 描边宽度（输出像素，`outline` 模式），`0` 表示自动，约字号的 6% |
+| `--subtitle-box-padding X` | `0` | 文字四周内边距（输出像素，`box` 模式），`0` 表示自动，1920 高时约 6.7 px |
 | `--subtitle-margin-v N` | `36` | 底部安全边距（输出像素） |
 | `--subtitle-margin-left N` | `50` | 左侧安全边距（输出像素） |
 | `--subtitle-margin-right N` | `50` | 右侧安全边距（输出像素） |

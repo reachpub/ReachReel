@@ -46,6 +46,9 @@ def _overrides(args: argparse.Namespace) -> dict:
         "subtitle_size": getattr(args, "subtitle_size", None),
         "subtitle_max_chars": getattr(args, "subtitle_chars", None),
         "subtitle_preset": getattr(args, "subtitle_preset", None),
+        "subtitle_render": getattr(args, "subtitle_render", None),
+        "subtitle_outline": getattr(args, "subtitle_outline", None),
+        "subtitle_box_padding": getattr(args, "subtitle_box_padding", None),
         "subtitle_margin_v": getattr(args, "subtitle_margin_v", None),
         "subtitle_margin_left": getattr(args, "subtitle_margin_left", None),
         "subtitle_margin_right": getattr(args, "subtitle_margin_right", None),
@@ -174,6 +177,24 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help=t("cli.subtitle_preset"),
         )
+        p.add_argument(
+            "--subtitle-render",
+            choices=["outline", "box", "none"],
+            default=None,
+            help=t("cli.subtitle_render"),
+        )
+        p.add_argument(
+            "--subtitle-outline",
+            type=float,
+            default=None,
+            help=t("cli.subtitle_outline"),
+        )
+        p.add_argument(
+            "--subtitle-box-padding",
+            type=float,
+            default=None,
+            help=t("cli.subtitle_box_padding"),
+        )
         p.add_argument("--subtitle-margin-v", type=int, default=None, help=t("cli.subtitle_margin_v"))
         p.add_argument(
             "--subtitle-margin-left",
@@ -279,6 +300,24 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["douyin", "reels", "shorts", "landscape"],
         default=None,
         help=t("cli.subtitle_preset"),
+    )
+    render.add_argument(
+        "--subtitle-render",
+        choices=["outline", "box", "none"],
+        default=None,
+        help=t("cli.subtitle_render"),
+    )
+    render.add_argument(
+        "--subtitle-outline",
+        type=float,
+        default=None,
+        help=t("cli.subtitle_outline"),
+    )
+    render.add_argument(
+        "--subtitle-box-padding",
+        type=float,
+        default=None,
+        help=t("cli.subtitle_box_padding"),
     )
     render.add_argument(
         "--subtitle-margin-v",

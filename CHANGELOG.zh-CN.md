@@ -16,6 +16,8 @@
 
 ### 变更
 
+- 硬字幕默认改为白字 + 黑描边 + 轻微阴影（`BorderStyle=1`，`subtitle_render = "outline"`），不再使用遮住大片画面的半透明黑底色块。描边宽度约为 `subtitle_size` 的 6%，可用 `subtitle_outline` / `--subtitle-outline` 覆盖。
+- `subtitle_render = "box"`（或 `--subtitle-render box`）可恢复旧观感，其内边距现在可用 `subtitle_box_padding` / `--subtitle-box-padding` 调整；`subtitle_render = "none"` 输出纯白字、无描边无阴影。已在 `render_settings` 中记录过的旧工作目录沿用原模式。
 - 支持平台收窄为 Apple Silicon 上的 macOS 14+；不支持 Intel macOS，CI 固定使用当前 arm64 标签。
 - `reachreel doctor` 增加主机架构检查：非 Apple Silicon 机器上的 `平台` 一项会直接判失败，而不是默默跑出很慢的结果。
 - 最低 Python 版本提高到 3.11（`mlx-audio` 的硬性要求），并移除 `tomli` 回退；Python 3.10 已无法安装本包。

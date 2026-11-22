@@ -152,6 +152,9 @@ Kokoro Chinese voices:
 | `subtitle_font` | `PingFang SC` | Font |
 | `subtitle_size` | `48` | Subtitle font size (output pixels) |
 | `subtitle_preset` | `""` | Platform safe-area preset: `douyin` / `reels` / `shorts` / `landscape` |
+| `subtitle_render` | `outline` | `outline`: white text with a black stroke and soft shadow (covers only the glyph edges); `box`: white text on a translucent black box (older behaviour, hides more of the frame); `none`: plain white text without stroke or shadow (bright footage can wash it out) |
+| `subtitle_outline` | `0.0` | Stroke thickness in output pixels, `outline` mode only; `0` means auto (about 6% of `subtitle_size`) |
+| `subtitle_box_padding` | `0.0` | Padding around the text in output pixels, `box` mode only; `0` means auto (about 6.7 px at 1920 height) |
 | `subtitle_margin_v` | `36` | Bottom safe margin (output pixels) |
 | `subtitle_margin_left` | `50` | Left safe margin (output pixels) |
 | `subtitle_margin_right` | `50` | Right safe margin (output pixels) |
@@ -172,6 +175,18 @@ subtitle_preset = "douyin"   # douyin | reels | shorts | landscape
 | `landscape` | 40 | 60 | 60 |
 
 Leave `subtitle_preset = ""` to tune `subtitle_margin_*` manually.
+
+### Subtitle look
+
+The default is the style most platforms use: white fill, black stroke, a soft shadow, and no background block, so the footage stays visible:
+
+```toml
+subtitle_render = "outline"   # outline | box | none
+subtitle_outline = 0.0        # 0 = auto, about 6% of subtitle_size (outline mode)
+subtitle_box_padding = 0.0    # 0 = auto, about 6.7 px at 1920 height (box mode)
+```
+
+`subtitle_render = "box"` restores the older translucent black box; its padding scales with the output height (about 6.7 px at 1920) unless `subtitle_box_padding` is set. `subtitle_render = "none"` draws plain white text: use it only when the footage is dark enough everywhere the subtitles land. Existing work directories keep whatever they recorded in `manifest.json` → `render_settings`; pass `--subtitle-render box` on `render` to reproduce an old render:
 
 Portrait recommendations:
 
@@ -384,6 +399,9 @@ subtitle_max_lines = 2
 subtitle_max_seconds = 6.0
 subtitle_font = "PingFang SC"
 subtitle_size = 48
+subtitle_render = "outline"  # outline | box | none
+subtitle_outline = 0.0       # 0 = auto (outline mode)
+subtitle_box_padding = 0.0   # 0 = auto (box mode)
 subtitle_preset = ""
 subtitle_margin_v = 60
 subtitle_margin_left = 50

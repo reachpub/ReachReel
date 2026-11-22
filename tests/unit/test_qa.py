@@ -1,3 +1,4 @@
+import argparse
 import json
 import tempfile
 import unittest
@@ -114,6 +115,18 @@ class QATests(unittest.TestCase):
         self.assertTrue(review.review_script)
         mix = parser.parse_args(["mix", "/tmp/workdir", "--bgm-fade", "3"])
         self.assertEqual(mix.bgm_fade, 3.0)
+
+    def test_every_subcommand_help_renders(self):
+        # argparse applies %-formatting to help strings; a stray "%" in a locale
+        # string crashes `--help` only when that subcommand is queried.
+        parser = build_parser()
+        parser.format_help()
+        actions = [a for a in parser._actions if isinstance(a, argparse._SubParsersAction)]
+        self.assertTrue(actions)
+        for action in actions:
+            for name, subparser in action.choices.items():
+                with self.subTest(subcommand=name):
+                    self.assertIn(name, subparser.format_help())
 
     def test_manifest_render_settings_are_reused_by_stage_commands(self):
         parser = build_parser()

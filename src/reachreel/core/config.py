@@ -61,6 +61,12 @@ class Settings:
     subtitle_max_seconds: float = 6.0
     subtitle_font: str = "PingFang SC"
     subtitle_size: int = 48  # output pixels (ASS PlayRes = output resolution)
+    # outline: white text + black outline (covers little of the frame)
+    # box: white text on a translucent black box (older behaviour)
+    # none: plain white text, no stroke and no shadow (bright footage may wash it out)
+    subtitle_render: str = "outline"
+    subtitle_outline: float = 0.0  # outline thickness in output pixels; 0 = auto
+    subtitle_box_padding: float = 0.0  # box mode padding in output pixels; 0 = auto
     subtitle_preset: str = ""  # "" | douyin | reels | shorts | landscape
     subtitle_margin_v: int = 36
     subtitle_margin_left: int = 50
@@ -154,6 +160,7 @@ class Settings:
         settings.ui_language = normalize_language(settings.ui_language)
         settings.content_language = normalize_content_language(settings.content_language)
         settings.subtitle_preset = normalize_subtitle_preset(settings.subtitle_preset)
+        settings.subtitle_render = normalize_subtitle_render(settings.subtitle_render)
         settings.bgm_root_resolved = Path(settings.bgm_dir).expanduser()
         return settings
 
@@ -189,6 +196,21 @@ def normalize_subtitle_preset(value: str | None) -> str:
     """Normalize a platform preset name; unknown values fall back to manual margins."""
     preset = str(value or "").strip().lower()
     return preset if preset in SUBTITLE_PRESETS else ""
+
+
+SUBTITLE_RENDER_MODES = ("outline", "box", "none")
+
+
+def normalize_subtitle_render(value: str | None) -> str:
+    """Normalize the subtitle render mode; anything unknown means ``outline``."""
+    mode = str(value or "").strip().lower()
+    if mode in {"stroke", "border", "outlined"}:
+        mode = "outline"
+    if mode in {"background", "block", "opaque_box"}:
+        mode = "box"
+    if mode in {"plain", "bare", "no_outline", "no-outline"}:
+        mode = "none"
+    return mode if mode in SUBTITLE_RENDER_MODES else "outline"
 
 
 def settings_to_dict(settings: Settings) -> dict[str, Any]:

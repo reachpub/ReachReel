@@ -267,6 +267,9 @@ reachreel run VIDEO [options]
 | `--subtitle-size N` | `48` | Subtitle font size (output pixels) |
 | `--subtitle-chars N` | `18` | Maximum characters per line |
 | `--subtitle-preset NAME` | Empty | `douyin` / `reels` / `shorts` / `landscape` safe-area preset; overrides the margins |
+| `--subtitle-render MODE` | `outline` | `outline`: white text + black stroke + soft shadow; `box`: translucent black box (older look, hides more video); `none`: plain white text |
+| `--subtitle-outline X` | `0` | Stroke width in output pixels (`outline` mode); `0` = auto (about 6% of the font size) |
+| `--subtitle-box-padding X` | `0` | Text padding in output pixels (`box` mode); `0` = auto (about 6.7 px at 1920 height) |
 | `--subtitle-margin-v N` | `36` | Bottom safe margin (output pixels) |
 | `--subtitle-margin-left N` | `50` | Left safe margin (output pixels) |
 | `--subtitle-margin-right N` | `50` | Right safe margin (output pixels) |

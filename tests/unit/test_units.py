@@ -189,6 +189,69 @@ class UnitTests(unittest.TestCase):
         settings.output_height = 720
         self.assertEqual(output_dimensions(1920, 1080, settings), (1280, 720))
 
+    def test_write_ass_defaults_to_white_text_with_black_outline(self):
+        settings = Settings()
+        settings.subtitle_size = 50
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.ass"
+            write_ass([Cue(0.0, 1.0, "x")], path, width=1080, height=1920, settings=settings)
+            text = path.read_text(encoding="utf-8")
+        style = next(line for line in text.splitlines() if line.startswith("Style:"))
+        fields = style.split(",")
+        self.assertEqual(fields[3], "&H00FFFFFF")  # white fill
+        self.assertEqual(fields[5], "&H00000000")  # black outline colour
+        self.assertEqual(fields[15], "1")  # BorderStyle=1 -> outline, no box
+        self.assertEqual(fields[16], "3.0")  # 50 * 0.06
+        self.assertEqual(fields[17], "2")  # soft shadow
+
+    def test_write_ass_box_mode_keeps_the_old_look(self):
+        settings = Settings()
+        settings.subtitle_render = "box"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.ass"
+            write_ass([Cue(0.0, 1.0, "x")], path, width=1080, height=1920, settings=settings)
+            text = path.read_text(encoding="utf-8")
+        fields = next(line for line in text.splitlines() if line.startswith("Style:")).split(",")
+        self.assertEqual(fields[15], "3")  # BorderStyle=3 -> opaque box
+        self.assertEqual(fields[16], "6.7")  # padding scales with 1920 height
+        self.assertEqual(fields[17], "0")
+
+    def test_write_ass_outline_override_and_normalization(self):
+        settings = Settings()
+        settings.subtitle_outline = 5.0
+        settings.subtitle_render = "stroke"  # alias for outline
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.ass"
+            write_ass([Cue(0.0, 1.0, "x")], path, width=1920, height=1080, settings=settings)
+            text = path.read_text(encoding="utf-8")
+        fields = next(line for line in text.splitlines() if line.startswith("Style:")).split(",")
+        self.assertEqual(fields[15], "1")
+        self.assertEqual(fields[16], "5.0")
+
+    def test_write_ass_none_mode_is_plain_text(self):
+        settings = Settings()
+        settings.subtitle_render = "none"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.ass"
+            write_ass([Cue(0.0, 1.0, "x")], path, width=1080, height=1920, settings=settings)
+            text = path.read_text(encoding="utf-8")
+        fields = next(line for line in text.splitlines() if line.startswith("Style:")).split(",")
+        self.assertEqual(fields[15], "1")  # BorderStyle=1 (no box)
+        self.assertEqual(fields[16], "0.0")  # no stroke
+        self.assertEqual(fields[17], "0")  # no shadow
+
+    def test_write_ass_box_padding_override(self):
+        settings = Settings()
+        settings.subtitle_render = "box"
+        settings.subtitle_box_padding = 3.0
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.ass"
+            write_ass([Cue(0.0, 1.0, "x")], path, width=1080, height=1920, settings=settings)
+            text = path.read_text(encoding="utf-8")
+        fields = next(line for line in text.splitlines() if line.startswith("Style:")).split(",")
+        self.assertEqual(fields[15], "3")
+        self.assertEqual(fields[16], "3.0")  # explicit padding wins over height/288
+
     def test_write_ass_uses_output_pixels(self):
         settings = Settings()
         settings.subtitle_size = 52

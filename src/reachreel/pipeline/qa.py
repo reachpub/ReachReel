@@ -352,6 +352,9 @@ def _subtitle_style(settings: dict[str, Any]) -> str:
     values.subtitle_margin_v = int(settings.get("subtitle_margin_v", 36))
     values.subtitle_margin_left = int(settings.get("subtitle_margin_left", 50))
     values.subtitle_margin_right = int(settings.get("subtitle_margin_right", 50))
+    values.subtitle_render = str(settings.get("subtitle_render") or "outline")
+    values.subtitle_outline = float(settings.get("subtitle_outline") or 0.0)
+    values.subtitle_box_padding = float(settings.get("subtitle_box_padding") or 0.0)
     return subtitle_style(values)
 
 

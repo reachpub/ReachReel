@@ -233,6 +233,9 @@ Key fields:
     "output_fps": 30,
     "crf": 20,
     "subtitle_size": 56,
+    "subtitle_render": "outline",
+    "subtitle_outline": 0.0,
+    "subtitle_box_padding": 0.0,
     "subtitle_size_unit": "px",
     "subtitle_layout": "ass",
     "subtitle_max_chars": 14,
@@ -444,6 +447,16 @@ Apply `atempo=factor` to every segment and place them again.
 5. Generate SRT.
 
 Key points:
+
+**Style** (`subtitles.subtitle_border`, `subtitle_render`):
+
+- `outline` (default): `BorderStyle=1`, white fill, black outline colour, stroke width `subtitle_outline` or about 6% of `subtitle_size`, plus a soft shadow. The stroke follows the glyph edges, so the footage behind the text stays visible;
+- `box`: `BorderStyle=3`, the older translucent black box (`BackColour=&H80000000`) whose padding is `height / 288`, or `subtitle_box_padding` when set;
+- `none`: `BorderStyle=1` with `Outline=0` and `Shadow=0` — plain white text, no stroke.
+
+Because `PlayResX/Y` equals the output resolution and `ScaledBorderAndShadow: yes`, the stroke width is real pixels.
+
+Other key points:
 
 - ASR text is not used, avoiding homophone typos;
 - no characters are dropped: `_cue_texts` guarantees every character lands in some cue;

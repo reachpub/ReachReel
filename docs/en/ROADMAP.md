@@ -231,6 +231,7 @@ See [LOCALIZATION.md §4](LOCALIZATION.md) (split table / migration steps / bann
 ### P1-5 Subtitle upgrade
 
 - Done: portrait/landscape safe-area presets (`subtitle_preset`);
+- Done: white text + black outline as the default look (`subtitle_render = "outline"`, `subtitle_outline`), with the old translucent box selectable as `box` (`subtitle_box_padding`) and plain white text as `none`;
 - per-character/per-word highlighting (karaoke);
 - bilingual subtitles;
 - subtitle templates: bottom bar, top title, name tags;

@@ -16,6 +16,8 @@
 
 ### Changed
 
+- Hard subtitles now default to white text with a black outline and a soft shadow (`BorderStyle=1`, `subtitle_render = "outline"`), instead of the translucent black box that hid a large part of the frame. The stroke is about 6% of `subtitle_size` and can be overridden with `subtitle_outline` / `--subtitle-outline`.
+- `subtitle_render = "box"` (or `--subtitle-render box`) restores the old look, with its padding now configurable via `subtitle_box_padding` / `--subtitle-box-padding`; `subtitle_render = "none"` draws plain white text without stroke or shadow. Work directories that recorded `render_settings` keep their previous mode.
 - Supported platform narrowed to macOS 14+ on Apple silicon; Intel macOS is not targeted, and CI pins the current arm64 label.
 - `reachreel doctor` now checks the host architecture and fails a `Platform` row on non-Apple-silicon machines instead of letting them run slowly.
 - Minimum Python is now 3.11 (`mlx-audio` requires it) and the `tomli` fallback was removed; Python 3.10 can no longer install the package.
