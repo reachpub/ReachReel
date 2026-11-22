@@ -27,6 +27,8 @@ No cloud API and no per-minute billing. The first run downloads the Kokoro and W
 - **Stage commands**: `script` / `tts` / `subtitle` / `mix` / `render` / `qa`; `run --only vlm,script` and `run --dry-run` for precise reruns.
 - **QA gate**: stream/duration checks, loudness and true peak, `astats` clipping, black/frozen frames (with source-motion comparison), subtitle pixel overflow, and narration/subtitle alignment.
 - **Resumable**: scene analysis, VLM, script, and TTS caches; changing one line only rebuilds the affected work.
+- **Fail-soft stages**: VLM/TTS/Whisper retry or fall back; degradations land in `manifest.json` as `quality_flags` instead of aborting the run.
+- **License tracking**: optional `inputs/bgm/manifest.json` metadata; `reachreel licenses <workdir>` exports `licenses.md`.
 - **Bilingual CLI**: `--lang en|zh-CN` switches the UI; `--content-language zh|en` independently selects the narration/subtitle language and prompt pack.
 
 ---
@@ -97,12 +99,14 @@ mix.wav          # narration + ambient + BGM
 manifest.json    # settings and statistics
 review.md        # script/placement review
 qa.json          # QA results
+licenses.md      # BGM license list
 ```
 
 QA and targeted reruns:
 
 ```bash
 reachreel qa output/<video-name>_<timestamp>
+reachreel licenses output/<video-name>_<timestamp>
 
 # Inspect the plan, then rerun VLM + script only
 reachreel run video.mp4 --workdir output/<video-name>_<timestamp> --only vlm,script --dry-run

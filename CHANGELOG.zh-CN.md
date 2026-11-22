@@ -9,10 +9,16 @@
 - CI 工作流（`.github/workflows/ci.yml`）：在 macOS 上对 Python 3.10 和 3.12 运行 Ruff、单元测试和 `uv build`。
 - 可选的集成 smoke 测试（`tests/integration/test_smoke.py`）：通过真实 CLI 用 macOS `say` 覆盖 `tts -> subtitle -> mix -> render -> qa`。
 - 为 Python 3.10 增加 `tomli` 回退，用于读取 TOML 语言目录和配置。
+- `manifest.json` 新增 `quality_flags`，记录不中断流程的降级（VLM 场景失败、TTS 段失败、ASR 回退、QA 警告）。
+- TTS 单段重试与失败隔离；单段失败会跳过，全部失败才明确报错中断。
+- VLM 和 Whisper 调用增加退避重试。
+- 可选的 `inputs/bgm/manifest.json` 曲目目录；`manifest.json` 记录 `bgm_metadata`，`reachreel licenses <workdir>` 导出 `licenses.md`。
+- `VideoInfo` 在显示宽高之外新增 `coded_width` / `coded_height`。
 
 ### 变更
 
 - 项目许可证由 MIT 改为 Apache-2.0；补充完整许可证文本和 `NOTICE` 文件。
+- 对带旋转的素材，`--height` 在文档和日志中统一为显示高度。
 
 ### 修复
 

@@ -407,6 +407,17 @@ reachreel qa output/xxx --config config.toml   # 用 [qa] 阈值覆盖 manifest
 
 硬字幕的像素超框检查会按 SRT 时长在 1080p 黑底上渲染一遍字幕层（2–4 fps），通常多花几秒；不需要时可在 `[qa]` 里设 `skip_subtitle_pixels = true`。
 
+### 7.7 `reachreel licenses`
+
+导出工作目录用到的 BGM 授权清单：
+
+```bash
+reachreel licenses output/xxx
+reachreel licenses output/xxx --out /tmp/licenses.md
+```
+
+命令从 `manifest.json` 读取 `bgm_metadata`（在 `mix` 阶段由 `inputs/bgm/manifest.json` 写入），并输出 `licenses.md`。如果工作目录是在目录文件出现之前混的音，先重新运行 `reachreel mix output/xxx`。
+
 ---
 
 ## 8. 输出目录
@@ -426,6 +437,7 @@ output/<视频名>_<时间戳>/
 ├── manifest.json      # 参数、统计、render_settings
 ├── review.md          # 文案/落点速览
 ├── qa.json            # 质量检查结果
+├── licenses.md        # BGM 授权清单（reachreel licenses）
 ├── frames/            # 抽出的关键帧
 └── tts/               # 每段配音 wav
 ```
@@ -558,6 +570,7 @@ reachreel subtitle output/xxx   # 重做字幕
 reachreel mix      output/xxx   # 重做混音
 reachreel render   output/xxx   # 重新渲染
 reachreel qa       output/xxx   # 质量检查
+reachreel licenses output/xxx   # 导出 BGM 授权清单
 ```
 
 ### 10.2 只改字幕

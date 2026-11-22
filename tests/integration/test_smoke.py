@@ -198,6 +198,7 @@ class StageSmokeTest(unittest.TestCase):
         self._cli("mix", workdir, "--config", config, "--no-bgm")
         self._cli("render", workdir, "--config", config, "--no-burn")
         self._cli("qa", workdir, "--config", config)
+        self._cli("licenses", workdir)
 
         final = self.workdir / "final.mp4"
         self.assertTrue(final.is_file(), "render did not create final.mp4")
@@ -216,6 +217,9 @@ class StageSmokeTest(unittest.TestCase):
 
         manifest = json.loads((self.workdir / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(manifest["narration_segments"], len(SEGMENT_TEXTS))
+
+        licenses = (self.workdir / "licenses.md").read_text(encoding="utf-8")
+        self.assertIn("BGM", licenses)
 
 
 if __name__ == "__main__":

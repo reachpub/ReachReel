@@ -407,6 +407,17 @@ Results are written to `qa.json`. `reachreel run` also runs QA once by default; 
 
 The hard-subtitle pixel overflow check renders the subtitle layer on a 1080p black background using the SRT timings (2–4 fps), which usually adds a few seconds. If you do not need it, set `skip_subtitle_pixels = true` in `[qa]`.
 
+### 7.7 `reachreel licenses`
+
+Export the BGM license list for a work directory:
+
+```bash
+reachreel licenses output/xxx
+reachreel licenses output/xxx --out /tmp/licenses.md
+```
+
+The command reads `bgm_metadata` from `manifest.json` (populated from `inputs/bgm/manifest.json` during `mix`) and writes `licenses.md`. If the work directory was mixed before the catalog existed, run `reachreel mix output/xxx` again first.
+
 ---
 
 ## 8. Output directory
@@ -426,6 +437,7 @@ output/<video-name>_<timestamp>/
 ├── manifest.json      # settings, statistics, render_settings
 ├── review.md          # script/placement review
 ├── qa.json            # QA results
+├── licenses.md        # BGM license list (reachreel licenses)
 ├── frames/            # extracted keyframes
 └── tts/               # per-segment voiceover wav
 ```
@@ -558,6 +570,7 @@ reachreel subtitle output/xxx   # redo subtitles
 reachreel mix      output/xxx   # redo mixing
 reachreel render   output/xxx   # re-render
 reachreel qa       output/xxx   # quality checks
+reachreel licenses output/xxx   # export the BGM license list
 ```
 
 ### 10.2 Change subtitles only

@@ -1,16 +1,71 @@
 """BGM selection and final audio mix with side-chain ducking."""
 from __future__ import annotations
 
+import json
 import logging
 import random
 from pathlib import Path
+from typing import Any
 
 from ..core.config import Settings
 from ..core.util import run
+from ..i18n import t
 
 LOG = logging.getLogger("reachreel.media.audio")
 
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
+BGM_CATALOG = "manifest.json"
+
+
+def load_bgm_catalog(directory: Path) -> dict[str, dict[str, Any]]:
+    """Load optional per-track metadata from ``<bgm_dir>/manifest.json``."""
+    path = directory / BGM_CATALOG
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        LOG.warning("Could not read the BGM catalog %s: %s", path, exc)
+        return {}
+    tracks = data.get("tracks") if isinstance(data, dict) else None
+    if not isinstance(tracks, list):
+        return {}
+    catalog: dict[str, dict[str, Any]] = {}
+    for item in tracks:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("file") or "").strip()
+        if name:
+            catalog[name] = dict(item)
+    return catalog
+
+
+def bgm_metadata(path: Path) -> dict[str, Any]:
+    """Return catalog metadata for one track, falling back to the file name."""
+    path = path.expanduser().resolve()
+    entry = dict(load_bgm_catalog(path.parent).get(path.name, {}))
+    entry.setdefault("file", path.name)
+    return entry
+
+
+def bgm_license_markdown(entries: list[dict[str, Any]]) -> str:
+    """Render a Markdown license table for the tracks used by a project."""
+    header = [
+        t("licenses.file"),
+        t("licenses.title"),
+        t("licenses.author"),
+        t("licenses.source"),
+        t("licenses.license"),
+    ]
+    lines = [f"# {t('licenses.heading')}", "", "| " + " | ".join(header) + " |"]
+    lines.append("|" + "---|" * len(header))
+    if not entries:
+        lines += ["", t("licenses.no_metadata")]
+        return "\n".join(lines) + "\n"
+    for entry in entries:
+        cells = [str(entry.get(key) or t("licenses.unknown")) for key in ("file", "title", "author", "source", "license")]
+        lines.append("| " + " | ".join(cell.replace("|", "\\|") for cell in cells) + " |")
+    return "\n".join(lines) + "\n"
 
 
 def pick_bgm(settings: Settings) -> Path | None:

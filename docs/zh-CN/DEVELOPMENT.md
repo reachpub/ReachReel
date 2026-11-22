@@ -81,14 +81,14 @@ qa
 | `src/reachreel/i18n/__init__.py` | CLI/UI 语言协商与文案目录 | `t`, `set_language`, `negotiate_language` |
 | `src/reachreel/prompts/__init__.py` | Prompt 包与内容文案目录加载 | `load_prompt`, `load_content`, `text` |
 | `src/reachreel/prompts/{zh,en}/` | 语言相关 prompt 与 fallback 数据 | `vlm.txt`, `script.txt`, `style.txt`, `messages.toml` |
-| `src/reachreel/domain/models.py` | 共享领域模型 | `VideoInfo`, `Scene`, `NarrationSegment`, `Cue` |
+| `src/reachreel/domain/models.py` | 共享领域模型 | `VideoInfo`, `Scene`, `NarrationSegment`, `Cue`, `QualityFlag` |
 | `src/reachreel/domain/timeline.py` | 旁白落点、整体加速、旁白轨 | `place_segments`, `build_narration_track` |
 | `src/reachreel/engines/vlm.py` | Ollama OpenAI 兼容客户端、VLM prompt、缓存 | `OllamaClient`, `analyze_scenes` |
 | `src/reachreel/engines/tts.py` | Kokoro / say 合成、文本切分、缓存 | `KokoroEngine`, `SayEngine`, `synthesize_segments` |
 | `src/reachreel/generation/script.py` | 写稿、压缩/扩写、兜底 | `generate_script` |
 | `src/reachreel/media/scenes.py` | 视频探测、镜头检测、抽帧 | `probe_video`, `detect_scenes`, `extract_frames` |
 | `src/reachreel/media/subtitles.py` | Whisper 转写、语音窗口、SRT、ASS 布局 | `cues_from_timeline`, `build_subtitles`, `write_ass` |
-| `src/reachreel/media/audio.py` | BGM 选择/循环、侧链闪避、响度 | `pick_bgm`, `mix_audio` |
+| `src/reachreel/media/audio.py` | BGM 选择/循环、曲目元数据、授权导出、侧链闪避、响度 | `pick_bgm`, `mix_audio`, `bgm_metadata`, `bgm_license_markdown` |
 | `src/reachreel/media/render.py` | 缩放/帧率、硬字幕/软字幕、封装 | `render`, `subtitle_style` |
 | `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor` |
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
@@ -112,7 +112,9 @@ qa
     "has_audio": true,
     "audio_channels": 2,
     "audio_sample_rate": 44100,
-    "rotation": 0.0
+    "rotation": 0.0,
+    "coded_width": 3840,
+    "coded_height": 2160
   },
   "scenes": [
     {
@@ -134,6 +136,7 @@ qa
 ```
 
 - `width` / `height` 是**显示分辨率**：如果视频带 90°/270° 旋转元数据，会交换宽高。
+- `coded_width` / `coded_height` 是旋转前的编码尺寸；`0` 表示早于这两个字段的旧工作目录。
 - `frames` 是绝对路径。
 - VLM 字段可能为空；脚本阶段有兜底。
 
@@ -243,6 +246,20 @@ qa
     "...": "完整 Settings 快照，供阶段命令恢复"
   },
   "bgm_source": "/abs/inputs/bgm/ski-ukulele.mp3",
+  "bgm_metadata": {
+    "file": "ski-ukulele.mp3",
+    "title": "...",
+    "author": "...",
+    "source": "https://...",
+    "license": "CC0-1.0"
+  },
+  "quality_flags": [
+    {
+      "code": "asr.fallback",
+      "params": {"engine": "mlx-whisper", "model": "..."},
+      "severity": "warning"
+    }
+  ],
   "scenes": 12,
   "narration_segments": 5,
   "narration_chars": 146,
@@ -261,6 +278,20 @@ qa
 
 `render_settings` 让 `reachreel render` 能复现上次的输出尺寸、字幕样式和 CRF。
 
+`quality_flags` 记录没有中断流程的降级情况。当前 code：
+
+| Code | 含义 |
+|---|---|
+| `vlm.scene_failed` | 单个场景重试后仍失败，摘要使用了回退文本。 |
+| `vlm.no_frames` | 场景没有可用的关键帧。 |
+| `vlm.unparsed` | VLM 返回的内容不是合法 JSON。 |
+| `tts.segment_failed` | 单段配音重试后仍失败并被跳过。 |
+| `asr.fallback` | Whisper 不可用或失败，字幕时间回退到 TTS 时间轴。 |
+| `asr.empty` | `subtitle_text = "asr"` 时 Whisper 没有返回 cue。 |
+| `qa.warn` / `qa.fail` | QA 门禁报出警告或失败。 |
+
+`bgm_metadata` 在曲目存在于目录中时从 `inputs/bgm/manifest.json` 复制；`reachreel licenses <workdir>` 会把它渲染成 `licenses.md`。
+
 ### 4.6 其他文件
 
 | 文件 | 说明 |
@@ -273,6 +304,7 @@ qa
 | `subtitles.srt` | 字幕（软字幕/兼容） |
 | `subtitles.ass` | 硬字幕布局，`PlayResX/Y` = 输出分辨率 |
 | `qa.json` | QA 闸门结果 |
+| `licenses.md` | `reachreel licenses` 导出的 BGM 授权清单 |
 | `final.mp4` | 成片 |
 
 ---
@@ -514,7 +546,7 @@ factor = clamp(factor, 1.0, max_speedup)
 `audio.pick_bgm` 目前随机。可以：
 
 - 根据 `style` / `mood` 关键词匹配文件名；
-- 读 `inputs/bgm/manifest.json` 给每首曲子打标签；
+- `inputs/bgm/manifest.json` 已经提供 title/author/source/license 元数据用于授权清单导出；可以继续扩展情绪标签；
 - 根据视频平均亮度/运动强度选情绪。
 
 ### 7.4 换渲染器

@@ -28,6 +28,8 @@
 - **阶段级命令**：`script` / `tts` / `subtitle` / `mix` / `render` / `qa`，改文案或字幕不必整条重跑；`run --only vlm,script` 精确重跑，`--dry-run` 先看计划。
 - **QA 闸门**：音视频流、时长、响度/真峰值、`astats` 削波、黑帧/冻结帧（对比源片排除静态长镜头）、字幕像素超框、旁白与字幕逐句偏差；阈值可用 `[qa]` 配置。
 - **可恢复**：场景分析、VLM、解说、TTS 都有缓存；改文案只重做受影响的部分。
+- **失败可降级**：VLM/TTS/Whisper 会重试或回退，降级写入 `manifest.json` 的 `quality_flags`，不直接中断整条流程。
+- **授权可追踪**：可选的 `inputs/bgm/manifest.json` 元数据；`reachreel licenses <workdir>` 导出 `licenses.md`。
 - **双语 CLI**：`--lang en|zh-CN` 切换界面；`--content-language zh|en` 独立选择旁白/字幕语言与提示词包。
 
 ---
@@ -98,12 +100,14 @@ mix.wav          # 旁白 + 原声 + BGM
 manifest.json    # 本次参数与统计
 review.md        # 文案/落点速览
 qa.json          # 质量检查结果
+licenses.md      # BGM 授权清单
 ```
 
 质量检查与返工：
 
 ```bash
 reachreel qa output/<视频名>_<时间戳>
+reachreel licenses output/<视频名>_<时间戳>
 
 # 先看计划，再只重跑 VLM + 文案
 reachreel run video.mp4 --workdir output/<视频名>_<时间戳> --only vlm,script --dry-run

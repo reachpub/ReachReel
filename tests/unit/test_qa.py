@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reachreel.cli.main import build_parser
+from reachreel.cli.main import build_parser, main
 from reachreel.core.config import Settings, settings_to_dict
-from reachreel.pipeline.orchestrator import STAGE_ORDER, parse_only
+from reachreel.pipeline.orchestrator import STAGE_ORDER, _flag_stage, parse_only
 from reachreel.pipeline.qa import (
     Check,
     QAReport,
@@ -68,12 +68,36 @@ class QATests(unittest.TestCase):
 
     def test_stage_commands_are_registered(self):
         parser = build_parser()
-        for command in ("script", "tts", "subtitle", "mix", "render", "qa"):
+        for command in ("script", "tts", "subtitle", "mix", "render", "qa", "licenses"):
             args = parser.parse_args([command, "/tmp/workdir"])
             self.assertEqual(args.command, command)
         args = parser.parse_args(["run", "/tmp/video.mp4", "--no-qa", "--qa-strict"])
         self.assertTrue(args.no_qa)
         self.assertTrue(args.qa_strict)
+
+    def test_licenses_command_writes_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = {
+                "bgm_metadata": {
+                    "file": "calm.mp3",
+                    "title": "Calm",
+                    "license": "CC0-1.0",
+                }
+            }
+            (Path(tmp) / "manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8")
+            code = main(["licenses", tmp])
+            self.assertEqual(code, 0)
+            text = (Path(tmp) / "licenses.md").read_text(encoding="utf-8")
+        self.assertIn("Calm", text)
+        self.assertIn("CC0-1.0", text)
+
+    def test_quality_flag_stage_mapping(self):
+        self.assertEqual(_flag_stage("vlm.scene_failed"), "vlm")
+        self.assertEqual(_flag_stage("tts.segment_failed"), "tts")
+        self.assertEqual(_flag_stage("asr.fallback"), "subtitles")
+        self.assertEqual(_flag_stage("qa.warn"), "qa")
+        self.assertEqual(_flag_stage("unknown"), "")
 
     def test_parse_only(self):
         self.assertEqual(parse_only("vlm,script"), ["vlm", "script"])

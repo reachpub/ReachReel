@@ -277,6 +277,10 @@ def build_parser() -> argparse.ArgumentParser:
     doc = sub.add_parser("doctor", help=t("cli.doctor"))
     doc.add_argument("--config", default=None)
 
+    licenses = sub.add_parser("licenses", help=t("cli.licenses"))
+    licenses.add_argument("workdir", type=Path)
+    licenses.add_argument("--out", type=Path, default=None, help=t("cli.licenses_out"))
+
     return parser
 
 
@@ -438,6 +442,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         atomic_write_json(workdir / "manifest.json", manifest)
         print(f"{out} (burned={burned})")
+        return 0
+
+    if args.command == "licenses":
+        from ..media.audio import bgm_license_markdown
+
+        workdir = args.workdir.resolve()
+        manifest = read_json(workdir / "manifest.json", {}) or {}
+        metadata = manifest.get("bgm_metadata")
+        entries = [metadata] if isinstance(metadata, dict) and metadata else []
+        out = args.out.expanduser() if args.out else workdir / "licenses.md"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(bgm_license_markdown(entries), encoding="utf-8")
+        print(out)
         return 0
 
     if args.command == "qa":

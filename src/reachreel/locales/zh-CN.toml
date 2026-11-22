@@ -50,6 +50,8 @@ qa_config = "用配置文件里的 [qa] 阈值覆盖 manifest"
 strict = "有警告也返回非 0"
 json = "输出 JSON"
 doctor = "检查本地环境"
+licenses = "导出已有工作目录的 BGM 授权清单"
+licenses_out = "报告输出路径（默认 <workdir>/licenses.md）"
 
 [common]
 on = "开"
@@ -196,3 +198,13 @@ bgm_tracks = "{path}（{count} 首，可选）"
 bgm_empty = "{path}（无曲目，可选）"
 ready = "可以开始"
 fix = "请先补齐上面标记 !! 的项"
+
+[licenses]
+heading = "素材授权清单"
+file = "文件"
+title = "标题"
+author = "作者"
+source = "来源"
+license = "许可证"
+unknown = "未知"
+no_metadata = "没有找到 BGM 元数据。请在 inputs/bgm/manifest.json 中按曲目补充信息，然后重新运行 mix。"

@@ -81,14 +81,14 @@ qa
 | `src/reachreel/i18n/__init__.py` | CLI/UI language negotiation and message catalog | `t`, `set_language`, `negotiate_language` |
 | `src/reachreel/prompts/__init__.py` | Prompt-pack and content-catalog loader | `load_prompt`, `load_content`, `text` |
 | `src/reachreel/prompts/{zh,en}/` | Language-specific prompts and fallback data | `vlm.txt`, `script.txt`, `style.txt`, `messages.toml` |
-| `src/reachreel/domain/models.py` | Shared domain models | `VideoInfo`, `Scene`, `NarrationSegment`, `Cue` |
+| `src/reachreel/domain/models.py` | Shared domain models | `VideoInfo`, `Scene`, `NarrationSegment`, `Cue`, `QualityFlag` |
 | `src/reachreel/domain/timeline.py` | Narration placement, global speed-up, narration track | `place_segments`, `build_narration_track` |
 | `src/reachreel/engines/vlm.py` | Ollama OpenAI-compatible client, VLM prompt, cache | `OllamaClient`, `analyze_scenes` |
 | `src/reachreel/engines/tts.py` | Kokoro / say synthesis, text chunking, cache | `KokoroEngine`, `SayEngine`, `synthesize_segments` |
 | `src/reachreel/generation/script.py` | Script writing, compression/expansion, fallback | `generate_script` |
 | `src/reachreel/media/scenes.py` | Video probing, scene detection, frame extraction | `probe_video`, `detect_scenes`, `extract_frames` |
 | `src/reachreel/media/subtitles.py` | Whisper transcription, speech windows, SRT, ASS layout | `cues_from_timeline`, `build_subtitles`, `write_ass` |
-| `src/reachreel/media/audio.py` | BGM selection/looping, sidechain ducking, loudness | `pick_bgm`, `mix_audio` |
+| `src/reachreel/media/audio.py` | BGM selection/looping, catalog metadata, license export, sidechain ducking, loudness | `pick_bgm`, `mix_audio`, `bgm_metadata`, `bgm_license_markdown` |
 | `src/reachreel/media/render.py` | Scaling/frame rate, burned-in/soft subtitles, muxing | `render`, `subtitle_style` |
 | `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor` |
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
@@ -112,7 +112,9 @@ All intermediate files live under `workdir/` and use UTF-8 JSON.
     "has_audio": true,
     "audio_channels": 2,
     "audio_sample_rate": 44100,
-    "rotation": 0.0
+    "rotation": 0.0,
+    "coded_width": 3840,
+    "coded_height": 2160
   },
   "scenes": [
     {
@@ -134,6 +136,7 @@ All intermediate files live under `workdir/` and use UTF-8 JSON.
 ```
 
 - `width` / `height` are the **display resolution**: if the video carries 90°/270° rotation metadata, width and height are swapped.
+- `coded_width` / `coded_height` are the encoded frame size before rotation is applied; `0` means an old work directory that predates these fields.
 - `frames` are absolute paths.
 - VLM fields may be empty; the script stage has a fallback.
 
@@ -243,6 +246,20 @@ Key fields:
     "...": "full Settings snapshot for stage commands to restore from"
   },
   "bgm_source": "/abs/inputs/bgm/ski-ukulele.mp3",
+  "bgm_metadata": {
+    "file": "ski-ukulele.mp3",
+    "title": "...",
+    "author": "...",
+    "source": "https://...",
+    "license": "CC0-1.0"
+  },
+  "quality_flags": [
+    {
+      "code": "asr.fallback",
+      "params": {"engine": "mlx-whisper", "model": "..."},
+      "severity": "warning"
+    }
+  ],
   "scenes": 12,
   "narration_segments": 5,
   "narration_chars": 146,
@@ -261,6 +278,20 @@ Key fields:
 
 `render_settings` lets `reachreel render` reproduce the previous output size, subtitle style, and CRF.
 
+`quality_flags` records degradations that did not stop the run. Current codes:
+
+| Code | Meaning |
+|---|---|
+| `vlm.scene_failed` | One scene failed after retries; its summary came from the fallback. |
+| `vlm.no_frames` | No keyframe was available for a scene. |
+| `vlm.unparsed` | The VLM returned text that was not valid JSON. |
+| `tts.segment_failed` | One segment failed after retries and was skipped. |
+| `asr.fallback` | Whisper was unavailable or failed; subtitle timing fell back to the TTS timeline. |
+| `asr.empty` | Whisper returned no cues while `subtitle_text = "asr"`. |
+| `qa.warn` / `qa.fail` | The QA gate reported warnings or failures. |
+
+`bgm_metadata` is copied from `inputs/bgm/manifest.json` when the track exists in the catalog; `reachreel licenses <workdir>` renders it as `licenses.md`.
+
 ### 4.6 Other files
 
 | File | Description |
@@ -273,6 +304,7 @@ Key fields:
 | `subtitles.srt` | Subtitles (soft-subtitle/compatible) |
 | `subtitles.ass` | Burned-in subtitle layout, `PlayResX/Y` = output resolution |
 | `qa.json` | QA gate results |
+| `licenses.md` | BGM license list exported by `reachreel licenses` |
 | `final.mp4` | Final cut |
 
 ---
@@ -514,7 +546,7 @@ Local inputs live under `inputs/` and are ignored by Git: `inputs/bgm/` is used 
 `audio.pick_bgm` is currently random. You can:
 
 - match filenames against `style` / `mood` keywords;
-- read `inputs/bgm/manifest.json` to tag each track;
+- `inputs/bgm/manifest.json` already supplies title/author/source/license metadata for the license export; extend it with mood tags;
 - pick a mood based on the video's average brightness/motion intensity.
 
 ### 7.4 Change the renderer

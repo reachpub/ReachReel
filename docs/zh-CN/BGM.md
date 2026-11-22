@@ -47,6 +47,28 @@ reachreel run video.mp4 --bgm inputs/bgm/calm-morning.mp3
 
 仓库不包含任何 BGM。把你的曲目放进 `inputs/bgm/`；所有音频文件默认被 Git 忽略。如果确实要版本化某首曲子，用 `git add -f` 强制加入。
 
+## 曲目目录
+
+`inputs/bgm/manifest.json` 是可选的，只保存元数据，暂不影响选曲。给每首曲子补一条记录，发布前就能导出授权清单：
+
+```json
+{
+  "tracks": [
+    {
+      "file": "calm-morning.mp3",
+      "title": "Calm Morning",
+      "author": "Example Artist",
+      "source": "https://example.com/calm-morning",
+      "license": "CC0-1.0",
+      "duration": 152.3,
+      "mood": ["calm", "morning"]
+    }
+  ]
+}
+```
+
+`mix` 会把匹配的记录写进 `manifest.json` 的 `bgm_metadata`，`reachreel licenses <workdir>` 再把它渲染成 `licenses.md`。
+
 ## 授权
 
 请使用 CC0 或明确允许商用的曲目，并在发布前逐首确认授权。没有做过独立授权审查前，不要在本仓库重新分发第三方曲目。

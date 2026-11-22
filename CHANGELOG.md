@@ -9,10 +9,16 @@
 - CI workflow (`.github/workflows/ci.yml`) running Ruff, the unit suite, and `uv build` on macOS for Python 3.10 and 3.12.
 - Opt-in integration smoke test (`tests/integration/test_smoke.py`) covering `tts -> subtitle -> mix -> render -> qa` through the real CLI with macOS `say`.
 - `tomli` fallback so Python 3.10 can load TOML catalogs and configuration.
+- `manifest.json` now records `quality_flags` for degradations that do not stop the run (VLM scene failure, TTS segment failure, ASR fallback, QA warnings).
+- Per-segment TTS retry and failure isolation; a single failed segment is skipped, while a total TTS failure aborts with a clear message.
+- VLM and Whisper calls now retry with backoff.
+- Optional `inputs/bgm/manifest.json` track catalog; `manifest.json` records `bgm_metadata`, and `reachreel licenses <workdir>` exports `licenses.md`.
+- `VideoInfo` now records `coded_width` / `coded_height` alongside the rotated display size.
 
 ### Changed
 
 - Project license changed from MIT to Apache-2.0; added the full license text and a `NOTICE` file.
+- `--height` is consistently documented and logged as display height for rotated footage.
 
 ### Fixed
 

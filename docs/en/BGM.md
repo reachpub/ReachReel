@@ -47,6 +47,28 @@ reachreel run video.mp4 --bgm inputs/bgm/calm-morning.mp3
 
 No BGM is bundled with the repository. Put your own tracks in `inputs/bgm/`; all audio files are ignored by Git. If you intentionally want to version a track, force-add it with `git add -f`.
 
+## Track catalog
+
+`inputs/bgm/manifest.json` is optional; it only carries metadata and does not affect selection yet. Give each track an entry so the license list can be exported before publishing:
+
+```json
+{
+  "tracks": [
+    {
+      "file": "calm-morning.mp3",
+      "title": "Calm Morning",
+      "author": "Example Artist",
+      "source": "https://example.com/calm-morning",
+      "license": "CC0-1.0",
+      "duration": 152.3,
+      "mood": ["calm", "morning"]
+    }
+  ]
+}
+```
+
+`mix` copies the matching entry into `manifest.json` as `bgm_metadata`, and `reachreel licenses <workdir>` renders it as `licenses.md`.
+
 ## Licensing
 
 Use CC0 or clearly commercial-use-licensed music, and verify the license for every track before publishing. Do not redistribute third-party tracks in this repository without your own license review.

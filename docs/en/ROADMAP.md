@@ -40,6 +40,9 @@ Validated on two real clips:
 - **P0-2 stage commands (done)**: `script` / `tts` / `subtitle` / `mix` / `render` / `qa`; the full `script → tts → subtitle → mix → render → qa` chain has been exercised on 6s footage; `run --only vlm,script` and `run --dry-run` are available.
 - **P0-5 QA gate (done)**: `reachreel qa`, writes `qa.json`; `run` executes it automatically by default; `--strict` makes warnings fail too. Added subtitle pixel overflow, narration/subtitle per-sentence deviation, `astats` clipping checks, `[qa]` threshold configuration, and tuning for static long-shot freeze false positives.
 - **Subtitle layout (done)**: burned-in subtitles now use `subtitles.ass`, `PlayRes` equals the output resolution, and `subtitle_size` / margins are real pixels; the portrait overflow issue is fixed.
+- **P0-1 rotation metadata (done)**: display vs coded dimensions and rotation tests.
+- **P0-3 retries and quality flags (done)**: VLM/LLM/TTS/Whisper retry or fall back; degradations land in `manifest.quality_flags`.
+- **P0-8 BGM metadata (done)**: `inputs/bgm/manifest.json`, `manifest.bgm_metadata`, and `reachreel licenses`.
 - Rotation/portrait display resolution fix.
 - `render` reuses `manifest.render_settings`.
 
@@ -49,15 +52,13 @@ Validated on two real clips:
 
 If these are not solved, the more features we add, the more likely things break.
 
-### P0-1 Fully wire through rotation/portrait metadata
+### P0-1 Rotation/portrait metadata (done)
 
-- Current state: `probe_video` already reads rotation and swaps the display width/height; rendering relies on FFmpeg's automatic rotation.
-- TODO:
-  - add tests: 90°/270° rotation, portrait, square;
-  - unify the semantics of `--height` as "display height" in docs/logs;
-  - record both coded and display width/height in `manifest`.
+- `probe_video` records `coded_width`/`coded_height` plus the swapped display `width`/`height`; `manifest.json` carries both.
+- `--height` is documented and logged as display height.
+- Tests cover 0°/90°/180°/270°/-90° and square frames.
 
-**Acceptance**: a portrait iPhone clip logs 1080×1920, outputs 1080×1920, and the `manifest` agrees.
+**Acceptance**: a portrait iPhone clip logs 1080×1920, outputs 1080×1920, and the `manifest` agrees. Passed.
 
 ### P0-2 Stage commands (done)
 
@@ -77,14 +78,14 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 
 **Acceptance**: editing the script does not require rerunning the VLM; editing subtitles does not require rerunning TTS; every step can be retried independently. Passed.
 
-### P0-3 Error handling and retries
+### P0-3 Error handling and retries (done)
 
-- VLM / LLM / TTS / Whisper all need explicit retry policies and failure messages;
-- when some scenes fail, allow the run to continue and mark `quality_flags`;
-- a single TTS failure must not crash the whole pipeline;
-- when FFmpeg fails, keep the full command and stderr.
+- Ollama VLM/LLM calls retry with backoff; `quality_flags` records `vlm.scene_failed`, `vlm.no_frames`, and `vlm.unparsed`.
+- TTS retries each segment and isolates failures as `tts.segment_failed`; only a total TTS failure aborts the stage.
+- Whisper retries once, then falls back to the TTS timeline (`asr.fallback`).
+- When FFmpeg fails, the full command and stderr tail are preserved.
 
-**Acceptance**: when the network is down / Ollama is dead / a model is missing, the error directly points to "which step, which file, how to fix it".
+**Acceptance**: when the network is down / Ollama is dead / a model is missing, the error directly points to "which step, which file, how to fix it". Passed.
 
 ### P0-4 Subtitle safe area and line breaking
 
@@ -140,13 +141,11 @@ Implemented:
   - the same footage can be reused across project directories;
   - a cache cleanup command.
 
-### P0-8 BGM metadata
+### P0-8 BGM metadata (done)
 
-- currently only the file path is recorded;
-- TODO:
-  - `inputs/bgm/manifest.json`: title, author, source URL, license, duration, mood tags;
-  - write the BGM source into `manifest.json` at render time;
-  - one-click export of a "media license list" before publishing.
+- `inputs/bgm/manifest.json` carries title, author, source URL, license, duration, and mood tags.
+- `mix` copies the matching entry into `manifest.json` as `bgm_metadata`.
+- `reachreel licenses <workdir>` writes `licenses.md` for publishing review.
 
 ### P0-9 Cross-platform correctness (must be done before the panel)
 

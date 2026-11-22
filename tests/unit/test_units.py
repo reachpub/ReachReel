@@ -1,17 +1,31 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from reachreel.core.config import Settings
 from reachreel.core.util import srt_timestamp
-from reachreel.domain.models import Cue, NarrationSegment, Scene
+from reachreel.domain.models import (
+    Cue,
+    NarrationSegment,
+    QualityFlag,
+    Scene,
+    VideoInfo,
+    merge_quality_flags,
+)
 from reachreel.domain.timeline import place_segments
+from reachreel.engines.tts import _synthesize_with_retries, synthesize_segments
 from reachreel.generation.script import _extract_json_array
+from reachreel.i18n import set_language
+from reachreel.media.audio import bgm_license_markdown, bgm_metadata, load_bgm_catalog
 from reachreel.media.render import output_dimensions
+from reachreel.media.scenes import display_dimensions
 from reachreel.media.subtitles import (
     _cue_texts,
     _split_text,
     ass_timestamp,
+    build_subtitles,
     cues_from_timeline,
     read_srt,
     write_ass,
@@ -95,6 +109,164 @@ class UnitTests(unittest.TestCase):
         self.assertAlmostEqual(cues[0].start, 1.0)
         self.assertAlmostEqual(cues[0].end, 3.5)
         self.assertEqual(cues[0].text, "第一行\n第二行")
+
+    def test_display_dimensions_rotation(self):
+        self.assertEqual(display_dimensions(1920, 1080, 0), (1920, 1080))
+        self.assertEqual(display_dimensions(1920, 1080, 180), (1920, 1080))
+        self.assertEqual(display_dimensions(1920, 1080, 90), (1080, 1920))
+        self.assertEqual(display_dimensions(1920, 1080, -90), (1080, 1920))
+        self.assertEqual(display_dimensions(1920, 1080, 270), (1080, 1920))
+        self.assertEqual(display_dimensions(1080, 1080, 90), (1080, 1080))
+
+    def test_video_info_accepts_legacy_scenes_json(self):
+        info = VideoInfo(
+            path="clip.mp4",
+            duration=1.0,
+            width=1920,
+            height=1080,
+            fps=24.0,
+            has_audio=False,
+        )
+        self.assertEqual((info.coded_width, info.coded_height), (0, 0))
+
+    def test_merge_quality_flags_deduplicates(self):
+        flags = merge_quality_flags(
+            [
+                {"code": "vlm.scene_failed", "params": {"scene": 1}, "severity": "warning"},
+                "corrupt",
+            ],
+            [
+                QualityFlag("vlm.scene_failed", {"scene": 1}),
+                QualityFlag("tts.segment_failed", {"id": 2}, "error"),
+            ],
+        )
+        self.assertEqual(len(flags), 2)
+        self.assertEqual(flags[1]["code"], "tts.segment_failed")
+
+    def test_bgm_catalog_and_license_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "tracks": [
+                            {
+                                "file": "calm.mp3",
+                                "title": "Calm",
+                                "author": "A",
+                                "source": "https://example.test/calm",
+                                "license": "CC0-1.0",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            catalog = load_bgm_catalog(directory)
+            self.assertEqual(catalog["calm.mp3"]["license"], "CC0-1.0")
+            metadata = bgm_metadata(directory / "calm.mp3")
+            self.assertEqual(metadata["title"], "Calm")
+            set_language("en")
+            report = bgm_license_markdown([metadata])
+            self.assertIn("Media licenses", report)
+            self.assertIn("Calm", report)
+            self.assertIn("CC0-1.0", report)
+            self.assertIn("No BGM metadata", bgm_license_markdown([]))
+
+    def test_tts_retries_before_success(self):
+        class FlakyEngine:
+            def __init__(self):
+                self.calls = 0
+
+            def synthesize(self, text, out, *, speed=1.0):
+                self.calls += 1
+                if self.calls < 3:
+                    raise RuntimeError("boom")
+                out.write_bytes(b"0" * 2048)
+                return 1.0
+
+        engine = FlakyEngine()
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "reachreel.engines.tts.time.sleep"
+        ) as sleep:
+            duration = _synthesize_with_retries(
+                engine,
+                NarrationSegment(id=1, scene_ids=[1], text="hello"),
+                Path(tmp) / "seg.wav",
+                speed=1.0,
+                retries=2,
+            )
+        self.assertEqual(duration, 1.0)
+        self.assertEqual(engine.calls, 3)
+        sleep.assert_called()
+
+    def test_tts_isolates_failed_segment(self):
+        class SelectiveEngine:
+            def synthesize(self, text, out, *, speed=1.0):
+                if text == "bad":
+                    raise RuntimeError("boom")
+                out.write_bytes(b"0" * 2048)
+                return 1.0
+
+        segments = [
+            NarrationSegment(id=1, scene_ids=[1], text="bad"),
+            NarrationSegment(id=2, scene_ids=[1], text="good"),
+        ]
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "reachreel.engines.tts.make_engine", return_value=SelectiveEngine()
+        ), patch("reachreel.engines.tts._wav_duration", return_value=1.0):
+            flags = synthesize_segments(
+                segments,
+                Path(tmp),
+                Settings(tts_engine="say"),
+                retries=0,
+            )
+        self.assertEqual(segments[0].audio_path, "")
+        self.assertTrue(segments[1].audio_path)
+        self.assertEqual([flag.code for flag in flags], ["tts.segment_failed"])
+        self.assertEqual(flags[0].params["id"], 1)
+
+    def test_tts_all_segments_failing_raises(self):
+        class FailingEngine:
+            def synthesize(self, text, out, *, speed=1.0):
+                raise RuntimeError("boom")
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            patch("reachreel.engines.tts.make_engine", return_value=FailingEngine()),
+            self.assertRaises(RuntimeError),
+        ):
+            synthesize_segments(
+                [NarrationSegment(id=1, scene_ids=[1], text="a")],
+                Path(tmp),
+                Settings(tts_engine="say"),
+                retries=0,
+            )
+
+    def test_asr_fallback_records_quality_flag(self):
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "reachreel.media.subtitles.transcribe_with_mlx_whisper",
+            return_value=None,
+        ):
+            flags = []
+            cues = build_subtitles(
+                Path(tmp) / "missing.wav",
+                [
+                    NarrationSegment(
+                        id=1,
+                        scene_ids=[1],
+                        text="第一句。",
+                        duration=1.0,
+                        start=0.0,
+                        end=1.0,
+                    )
+                ],
+                Path(tmp) / "sub.srt",
+                Settings(),
+                flags=flags,
+            )
+        self.assertTrue(cues)
+        self.assertEqual([flag.code for flag in flags], ["asr.fallback"])
 
 
 if __name__ == "__main__":

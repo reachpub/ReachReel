@@ -11,13 +11,18 @@ from typing import Any
 
 from ..core.config import Settings, settings_to_dict
 from ..core.util import LOG, atomic_write_json, ffmpeg_full, read_json
-from ..domain.models import NarrationSegment, VideoInfo
+from ..domain.models import (
+    NarrationSegment,
+    QualityFlag,
+    VideoInfo,
+    merge_quality_flags,
+)
 from ..domain.timeline import build_narration_track, place_segments, save_timeline
 from ..engines.tts import synthesize_segments
 from ..engines.vlm import OllamaClient, analyze_scenes
 from ..generation.script import generate_script
 from ..i18n import t
-from ..media.audio import mix_audio, pick_bgm, prepare_bgm_loop
+from ..media.audio import bgm_metadata, mix_audio, pick_bgm, prepare_bgm_loop
 from ..media.render import output_dimensions, render
 from ..media.scenes import (
     detect_scenes,
@@ -124,9 +129,13 @@ class Pipeline:
         self._scenes = None
         self._segments: list[NarrationSegment] | None = None
         self.bgm_source: Path | None = None
+        self.bgm_metadata: dict[str, Any] | None = None
         self.bgm_disabled = False
         self.qa_report = None
         self.burned_subtitles: bool | None = None
+        self.quality_flags: list[QualityFlag] = []
+        # Stages re-executed in this process; their old quality flags are dropped.
+        self.refreshed_stages: set[str] = set()
 
     # ---------- stages ----------
 
@@ -178,19 +187,22 @@ class Pipeline:
 
     def understand(self, *, force: bool | None = None) -> None:
         assert self._scenes is not None
+        self.refreshed_stages.add("vlm")
         force = self.force if force is None else force
         if force:
             self.vlm_cache_path.unlink(missing_ok=True)
-        analyze_scenes(
-            self._scenes,
-            base_url=self.settings.ollama_url,
-            model=self.settings.vlm_model,
-            workers=self.settings.vlm_workers,
-            cache_path=self.vlm_cache_path,
-            max_width=self.settings.vlm_max_width,
-            force=force,
-            context=self.settings.brief,
-            content_language=self.settings.content_language,
+        self.quality_flags.extend(
+            analyze_scenes(
+                self._scenes,
+                base_url=self.settings.ollama_url,
+                model=self.settings.vlm_model,
+                workers=self.settings.vlm_workers,
+                cache_path=self.vlm_cache_path,
+                max_width=self.settings.vlm_max_width,
+                force=force,
+                context=self.settings.brief,
+                content_language=self.settings.content_language,
+            )
         )
         info = self.load_video()
         save_scenes(self.scenes_path, info, self._scenes)
@@ -234,12 +246,15 @@ class Pipeline:
 
     def make_voice(self) -> None:
         assert self._segments is not None
-        synthesize_segments(
-            self._segments,
-            self.tts_dir,
-            self.settings,
-            speed=self.settings.tts_speed,
-            force=self.force,
+        self.refreshed_stages.add("tts")
+        self.quality_flags.extend(
+            synthesize_segments(
+                self._segments,
+                self.tts_dir,
+                self.settings,
+                speed=self.settings.tts_speed,
+                force=self.force,
+            )
         )
 
     def make_timeline(self) -> None:
@@ -260,12 +275,14 @@ class Pipeline:
 
     def make_subtitles(self, *, asr_engine: str = "mlx-whisper") -> None:
         assert self._segments is not None
+        self.refreshed_stages.add("subtitles")
         cues = build_subtitles(
             self.narration_path,
             self._segments,
             self.subtitles_path,
             self.settings,
             asr_engine=asr_engine,
+            flags=self.quality_flags,
         )
         info = self.load_video()
         out_width, out_height = output_dimensions(info.width, info.height, self.settings)
@@ -285,6 +302,7 @@ class Pipeline:
             if chosen:
                 self.bgm_disabled = False
                 self.bgm_source = chosen
+                self.bgm_metadata = bgm_metadata(chosen)
                 if chosen.resolve() == self.bgm_path.resolve() and self.bgm_path.exists():
                     # Stage commands may hand us the already-looping bed.
                     bgm_wav = self.bgm_path
@@ -412,6 +430,8 @@ class Pipeline:
         data.pop("qa", None)
         if not data.get("bgm_source") and not self.bgm_disabled:
             data["bgm_source"] = existing.get("bgm_source")
+        if not data.get("bgm_metadata") and not self.bgm_disabled:
+            data["bgm_metadata"] = existing.get("bgm_metadata")
         # Stage commands may not load scenes; keep the existing analysis summary.
         if not self._scenes and existing.get("scenes"):
             data["scenes"] = existing["scenes"]
@@ -690,6 +710,13 @@ class Pipeline:
     def write_manifest(self, *, started: float, burned: bool, announce: bool = True) -> None:
         info = self.load_video()
         segments = self._segments or []
+        existing = read_json(self.manifest_path, {}) or {}
+        kept_flags = [
+            flag
+            for flag in (existing.get("quality_flags") or [])
+            if isinstance(flag, dict)
+            and _flag_stage(str(flag.get("code") or "")) not in self.refreshed_stages
+        ]
         data = {
             "video": asdict(info),
             "workdir": str(self.workdir),
@@ -705,6 +732,8 @@ class Pipeline:
             },
             "settings_snapshot": settings_to_dict(self.settings),
             "bgm_source": str(self.bgm_source) if self.bgm_source else None,
+            "bgm_metadata": self.bgm_metadata
+            or (existing.get("bgm_metadata") if not self.bgm_disabled else None),
             "render_settings": {
                 "output_height": self.settings.output_height,
                 "output_fps": self.settings.output_fps,
@@ -723,6 +752,7 @@ class Pipeline:
                 "subtitle_layout": "ass",
                 "burn_subtitles": self.settings.burn_subtitles,
             },
+            "quality_flags": merge_quality_flags(kept_flags, self.quality_flags),
             "scenes": len(self._scenes or []),
             "narration_segments": len(segments),
             "narration_chars": sum(len(s.text) for s in segments),
@@ -748,6 +778,17 @@ class Pipeline:
         atomic_write_json(self.manifest_path, data)
         if announce:
             LOG.info("Done: %s (%.1fs)", self.output_path, time.time() - started)
+
+
+def _flag_stage(code: str) -> str:
+    """Map a quality-flag code to the stage that owns it."""
+    prefix = code.split(".", 1)[0]
+    return {
+        "vlm": "vlm",
+        "tts": "tts",
+        "asr": "subtitles",
+        "qa": "qa",
+    }.get(prefix, "")
 
 
 def _load_segments(data: dict[str, Any]) -> list[NarrationSegment]:

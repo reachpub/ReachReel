@@ -21,6 +21,7 @@ from ..core.util import (
     read_json,
     run,
 )
+from ..domain.models import QualityFlag, merge_quality_flags
 from ..i18n import t
 
 PASS = "pass"
@@ -1125,7 +1126,28 @@ def attach_to_manifest(workdir: Path, report: QAReport) -> None:
     if not path.exists():
         return
     data = read_json(path, {}) or {}
-    data["qa"] = report.summary
+    summary = report.summary
+    data["qa"] = summary
+    kept = [
+        flag
+        for flag in (data.get("quality_flags") or [])
+        if isinstance(flag, dict)
+        and not str(flag.get("code") or "").startswith("qa.")
+    ]
+    new_flags: list[QualityFlag] = []
+    if summary["warn"] or summary["fail"]:
+        new_flags.append(
+            QualityFlag(
+                code="qa.fail" if summary["fail"] else "qa.warn",
+                params={
+                    "pass": summary["pass"],
+                    "warn": summary["warn"],
+                    "fail": summary["fail"],
+                },
+                severity="error" if summary["fail"] else "warning",
+            )
+        )
+    data["quality_flags"] = merge_quality_flags(kept, new_flags)
     atomic_write_json(path, data)
 
 

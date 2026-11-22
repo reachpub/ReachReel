@@ -1,6 +1,8 @@
 """Shared domain models."""
 from __future__ import annotations
 
+import json
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -16,10 +18,51 @@ class VideoInfo:
     audio_channels: int = 0
     audio_sample_rate: int = 0
     rotation: float = 0.0
+    # Encoded (pre-rotation) frame size. ``width``/``height`` are display pixels.
+    coded_width: int = 0
+    coded_height: int = 0
 
     @property
     def aspect(self) -> float:
         return self.width / self.height if self.height else 16 / 9
+
+
+@dataclass
+class QualityFlag:
+    """Structured degradation notice stored in manifest.json.
+
+    ``code`` and ``params`` are the language-neutral contract; the CLI and the
+    future panel render a localized message from them.
+    """
+
+    code: str
+    params: dict[str, Any] = field(default_factory=dict)
+    severity: str = "warning"  # warning | error
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def merge_quality_flags(
+    *groups: Iterable[QualityFlag | dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Merge flag groups, preserving first-seen order and dropping duplicates."""
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        for flag in group or []:
+            if isinstance(flag, QualityFlag):
+                item = flag.to_dict()
+            elif isinstance(flag, dict):
+                item = dict(flag)
+            else:
+                continue
+            key = json.dumps(item, sort_keys=True, ensure_ascii=False)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return merged
 
 
 @dataclass

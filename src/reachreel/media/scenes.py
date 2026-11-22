@@ -15,6 +15,17 @@ from ..domain.models import Scene, VideoInfo
 LOG = logging.getLogger("reachreel.media.scenes")
 
 
+def display_dimensions(
+    coded_width: int,
+    coded_height: int,
+    rotation: float,
+) -> tuple[int, int]:
+    """Swap dimensions when 90°/270° rotation metadata is present."""
+    if abs(rotation) % 180 == 90:
+        return coded_height, coded_width
+    return coded_width, coded_height
+
+
 def probe_video(path: Path) -> VideoInfo:
     from ..core.util import ffprobe_json
 
@@ -41,10 +52,9 @@ def probe_video(path: Path) -> VideoInfo:
             except (TypeError, ValueError):
                 rotation = 0.0
             break
-    width = int(video.get("width") or 0)
-    height = int(video.get("height") or 0)
-    if abs(rotation) % 180 == 90:
-        width, height = height, width
+    coded_width = int(video.get("width") or 0)
+    coded_height = int(video.get("height") or 0)
+    width, height = display_dimensions(coded_width, coded_height, rotation)
     return VideoInfo(
         path=str(path),
         duration=duration,
@@ -55,6 +65,8 @@ def probe_video(path: Path) -> VideoInfo:
         audio_channels=int(audio.get("channels") or 0) if audio else 0,
         audio_sample_rate=int(audio.get("sample_rate") or 0) if audio else 0,
         rotation=rotation,
+        coded_width=coded_width,
+        coded_height=coded_height,
     )
 
 

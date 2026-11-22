@@ -5,12 +5,13 @@ import hashlib
 import logging
 import re
 import shutil
+import time
 import wave
 from pathlib import Path
 
 from ..core.config import Settings
 from ..core.util import run
-from ..domain.models import NarrationSegment
+from ..domain.models import NarrationSegment, QualityFlag
 
 LOG = logging.getLogger("reachreel.engines.tts")
 
@@ -197,6 +198,41 @@ def make_engine(settings: Settings):
     raise RuntimeError(f"Unknown TTS engine: {settings.tts_engine} (choose kokoro or say)")
 
 
+def _cleanup_partial(out_wav: Path) -> None:
+    for candidate in (out_wav, out_wav.with_suffix(".raw.wav"), out_wav.with_suffix(".aiff")):
+        candidate.unlink(missing_ok=True)
+
+
+def _synthesize_with_retries(
+    engine: KokoroEngine | SayEngine,
+    segment: NarrationSegment,
+    out_wav: Path,
+    *,
+    speed: float,
+    retries: int,
+) -> float:
+    attempts = max(1, retries + 1)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return engine.synthesize(segment.text, out_wav, speed=speed)
+        except Exception as exc:  # noqa: BLE001 - engine-specific failures vary
+            last_error = exc
+            if attempt < attempts:
+                wait = min(2**attempt, 5)
+                LOG.warning(
+                    "TTS attempt %d/%d failed for segment %d; retrying in %ss: %s",
+                    attempt,
+                    attempts,
+                    segment.id,
+                    wait,
+                    exc,
+                )
+                time.sleep(wait)
+    assert last_error is not None
+    raise last_error
+
+
 def synthesize_segments(
     segments: list[NarrationSegment],
     audio_dir: Path,
@@ -204,9 +240,18 @@ def synthesize_segments(
     *,
     speed: float = 1.0,
     force: bool = False,
-) -> None:
+    retries: int = 2,
+) -> list[QualityFlag]:
+    """Synthesize each segment, retrying and isolating per-segment failures.
+
+    A failed segment leaves ``audio_path`` empty and is recorded in the returned
+    quality flags; the remaining segments still get synthesized. If every
+    segment fails, the stage raises instead of producing a silent video.
+    """
     audio_dir.mkdir(parents=True, exist_ok=True)
     engine = make_engine(settings)
+    flags: list[QualityFlag] = []
+    failed = 0
     for index, segment in enumerate(segments, start=1):
         key = hashlib.sha1(
             f"{settings.tts_engine}|{settings.kokoro_model}|{settings.voice}|{speed:.4f}|{segment.text}".encode()
@@ -219,8 +264,45 @@ def synthesize_segments(
             LOG.info("  [%d/%d] TTS cache hit: %.2fs", index, len(segments), segment.duration)
             continue
         LOG.info("  [%d/%d] Synthesizing: %s", index, len(segments), segment.text[:30])
-        duration = engine.synthesize(segment.text, out, speed=speed)
+        try:
+            duration = _synthesize_with_retries(
+                engine,
+                segment,
+                out,
+                speed=speed,
+                retries=retries,
+            )
+        except Exception as exc:  # noqa: BLE001 - isolate per-segment failures
+            failed += 1
+            _cleanup_partial(out)
+            segment.audio_path = ""
+            segment.duration = 0.0
+            flags.append(
+                QualityFlag(
+                    code="tts.segment_failed",
+                    params={
+                        "id": segment.id,
+                        "attempts": max(1, retries + 1),
+                        "error": str(exc)[:200],
+                    },
+                    severity="error",
+                )
+            )
+            LOG.error(
+                "TTS failed for segment %d after %d attempts; skipping it: %s",
+                segment.id,
+                max(1, retries + 1),
+                exc,
+            )
+            continue
         segment.audio_path = str(out)
         segment.duration = duration
         segment.tts_speed = speed
         LOG.info("         done in %.2fs", duration)
+
+    if segments and failed == len(segments):
+        raise RuntimeError(
+            f"TTS failed for every segment ({failed}/{len(segments)}). "
+            f"Check the engine ({settings.tts_engine}) and voice ({settings.voice})."
+        )
+    return flags

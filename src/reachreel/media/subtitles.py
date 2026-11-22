@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 from ..core.config import Settings
 from ..core.util import srt_timestamp
-from ..domain.models import Cue, NarrationSegment
+from ..domain.models import Cue, NarrationSegment, QualityFlag
 
 LOG = logging.getLogger("reachreel.media.subtitles")
 
@@ -284,6 +285,7 @@ def transcribe_with_mlx_whisper(
     *,
     model: str,
     language: str = "zh",
+    retries: int = 1,
 ) -> dict[str, Any] | None:
     try:
         import mlx_whisper
@@ -291,18 +293,36 @@ def transcribe_with_mlx_whisper(
         LOG.warning("mlx-whisper is not installed; using the TTS timeline for subtitles")
         return None
     LOG.info("Transcribing narration with mlx-whisper (%s)...", model)
-    try:
-        return mlx_whisper.transcribe(
-            str(audio_path),
-            path_or_hf_repo=model,
-            language=language,
-            word_timestamps=True,
-            condition_on_previous_text=False,
-            verbose=False,
-        )
-    except Exception as exc:  # noqa: BLE001
-        LOG.warning("mlx-whisper transcription failed; falling back to the TTS timeline: %s", exc)
-        return None
+    attempts = max(1, retries + 1)
+    last_error: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            return mlx_whisper.transcribe(
+                str(audio_path),
+                path_or_hf_repo=model,
+                language=language,
+                word_timestamps=True,
+                condition_on_previous_text=False,
+                verbose=False,
+            )
+        except Exception as exc:  # noqa: BLE001 - mlx/ffmpeg failures vary
+            last_error = exc
+            if attempt < attempts:
+                wait = min(2**attempt, 5)
+                LOG.warning(
+                    "mlx-whisper attempt %d/%d failed; retrying in %ss: %s",
+                    attempt,
+                    attempts,
+                    wait,
+                    exc,
+                )
+                time.sleep(wait)
+    LOG.warning(
+        "mlx-whisper failed after %d attempts; falling back to the TTS timeline: %s",
+        attempts,
+        last_error,
+    )
+    return None
 
 
 def _speech_windows(
@@ -336,6 +356,7 @@ def build_subtitles(
     settings: Settings,
     *,
     asr_engine: str = "mlx-whisper",
+    flags: list[QualityFlag] | None = None,
 ) -> list[Cue]:
     result = None
     if asr_engine != "none":
@@ -344,6 +365,14 @@ def build_subtitles(
             model=settings.whisper_model,
             language=settings.asr_language,
         )
+        if result is None and flags is not None:
+            flags.append(
+                QualityFlag(
+                    code="asr.fallback",
+                    params={"engine": asr_engine, "model": settings.whisper_model},
+                    severity="warning",
+                )
+            )
     if result and settings.subtitle_text == "asr":
         cues = cues_from_asr(
             result,
@@ -355,6 +384,14 @@ def build_subtitles(
             LOG.info("Generated %d cues from ASR text", len(cues))
             write_srt(cues, out_srt)
             return cues
+        if flags is not None:
+            flags.append(
+                QualityFlag(
+                    code="asr.empty",
+                    params={"engine": asr_engine},
+                    severity="warning",
+                )
+            )
     if result:
         windows = _speech_windows(result, segments)
         cues = cues_from_timeline(

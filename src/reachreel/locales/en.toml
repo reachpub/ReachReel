@@ -50,6 +50,8 @@ qa_config = "Override manifest [qa] thresholds from a config file"
 strict = "Return non-zero for warnings too"
 json = "Print JSON"
 doctor = "Check the local environment"
+licenses = "Export the BGM license list for an existing work directory"
+licenses_out = "Write the report here (default: <workdir>/licenses.md)"
 
 [common]
 on = "on"
@@ -196,3 +198,13 @@ bgm_tracks = "{path} ({count} tracks, optional)"
 bgm_empty = "{path} (no tracks, optional)"
 ready = "Ready to start"
 fix = "Fix the items marked !! above first"
+
+[licenses]
+heading = "Media licenses"
+file = "File"
+title = "Title"
+author = "Author"
+source = "Source"
+license = "License"
+unknown = "unknown"
+no_metadata = "No BGM metadata was found. Add inputs/bgm/manifest.json with one entry per track, then re-run mix."

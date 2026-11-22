@@ -40,6 +40,9 @@
 - **P0-2 阶段级命令（已完成）**：`script` / `tts` / `subtitle` / `mix` / `render` / `qa`，已用 6s 素材走通 `script → tts → subtitle → mix → render → qa`；`run --only vlm,script` 与 `run --dry-run` 已可用。
 - **P0-5 QA 闸门（已完成）**：`reachreel qa`，输出 `qa.json`；`run` 默认自动执行；`--strict` 警告也失败。新增字幕像素超框、旁白/字幕逐句偏差、`astats` 削波检查、`[qa]` 阈值配置、静态长镜头冻结误报调优。
 - **字幕布局（已完成）**：硬字幕改为 `subtitles.ass`，`PlayRes` 等于输出分辨率，`subtitle_size` / 边距按真实像素；竖屏超框问题已修复。
+- **P0-1 旋转元数据（已完成）**：显示/编码宽高分离，并补齐旋转测试。
+- **P0-3 重试与 quality flags（已完成）**：VLM/LLM/TTS/Whisper 重试或回退，降级写入 `manifest.quality_flags`。
+- **P0-8 BGM 元数据（已完成）**：`inputs/bgm/manifest.json`、`manifest.bgm_metadata`、`reachreel licenses`。
 - 旋转/竖屏显示分辨率修正。
 - `render` 复用 `manifest.render_settings`。
 
@@ -49,15 +52,13 @@
 
 这些不解决，功能越多越容易出问题。
 
-### P0-1 旋转/竖屏元数据完整贯通
+### P0-1 旋转/竖屏元数据（已完成）
 
-- 现状：`probe_video` 已读取 rotation 并交换显示宽高；渲染依赖 FFmpeg 自动旋转。
-- 待办：
-  - 加测试：90°/270° 旋转、竖屏、方形；
-  - `--height` 的语义在文档/日志中统一为“显示高度”；
-  - `manifest` 同时记录编码宽高和显示宽高。
+- `probe_video` 记录 `coded_width`/`coded_height` 和交换后的显示 `width`/`height`；`manifest.json` 同时保存两者。
+- `--height` 在文档和日志中统一为显示高度。
+- 测试覆盖 0°/90°/180°/270°/-90° 和方形画面。
 
-**验收**：竖屏 iPhone 素材日志显示 1080×1920，输出 1080×1920，`manifest` 一致。
+**验收**：竖屏 iPhone 素材日志显示 1080×1920，输出 1080×1920，`manifest` 一致。已通过。
 
 ### P0-2 阶段级命令（已完成）
 
@@ -77,14 +78,14 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 
 **验收**：改文案不必重跑 VLM；改字幕不必重跑 TTS；每步可单独重试。已通过。
 
-### P0-3 错误处理与重试
+### P0-3 错误处理与重试（已完成）
 
-- VLM / LLM / TTS / Whisper 都要有明确的 retry 策略和失败提示；
-- 部分场景失败时，允许继续并标记 `quality_flags`；
-- TTS 单段失败不能导致整条流水线崩溃；
-- FFmpeg 失败时保留完整命令和 stderr。
+- Ollama VLM/LLM 调用带退避重试；`quality_flags` 记录 `vlm.scene_failed`、`vlm.no_frames`、`vlm.unparsed`。
+- TTS 每段重试并隔离失败（`tts.segment_failed`）；只有全部段失败才中断该阶段。
+- Whisper 重试一次，仍失败则回退到 TTS 时间轴（`asr.fallback`）。
+- FFmpeg 失败时保留完整命令和 stderr 尾部。
 
-**验收**：断网/Ollama 挂掉/模型不存在时，报错能直接指出“哪一步、哪个文件、怎么修”。
+**验收**：断网/Ollama 挂掉/模型不存在时，报错能直接指出“哪一步、哪个文件、怎么修”。已通过。
 
 ### P0-4 字幕安全区与断句
 
@@ -140,13 +141,11 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
   - 同一素材换项目目录也能复用；
   - 缓存清理命令。
 
-### P0-8 BGM 元数据
+### P0-8 BGM 元数据（已完成）
 
-- 现在只记录文件路径；
-- 待办：
-  - `inputs/bgm/manifest.json`：曲名、作者、来源 URL、许可证、时长、情绪标签；
-  - 渲染时把 BGM 来源写进 `manifest.json`；
-  - 发布前一键导出“素材授权清单”。
+- `inputs/bgm/manifest.json` 保存曲名、作者、来源 URL、许可证、时长和情绪标签。
+- `mix` 把匹配记录写入 `manifest.json` 的 `bgm_metadata`。
+- `reachreel licenses <workdir>` 生成发布前复核用的 `licenses.md`。
 
 ### P0-9 跨平台正确性（面板之前必须完成）
 

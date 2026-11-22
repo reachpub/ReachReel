@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.util import atomic_write_json, read_json
-from ..domain.models import Scene
+from ..domain.models import QualityFlag, Scene
 from ..prompts import load_prompt, text
 
 LOG = logging.getLogger("reachreel.engines.vlm")
@@ -131,6 +131,11 @@ def analyze_scene(
             "details": [],
             "mood": "",
             "narration_hint": "",
+            "quality": {
+                "code": "vlm.no_frames",
+                "params": {"scene": scene.id},
+                "severity": "warning",
+            },
         }
 
     content: list[dict[str, Any]] = []
@@ -154,12 +159,18 @@ def analyze_scene(
         max_tokens=700,
     )
     parsed = _json_from_text(raw)
+    quality: dict[str, Any] | None = None
     if not parsed:
         parsed = {
             "summary": raw.strip()[:200]
             or text(content_language, "vlm.analysis_failed")
         }
-    return {
+        quality = {
+            "code": "vlm.unparsed",
+            "params": {"scene": scene.id},
+            "severity": "warning",
+        }
+    result: dict[str, Any] = {
         "summary": str(parsed.get("summary") or "").strip(),
         "place": str(
             parsed.get("place") or text(content_language, "vlm.unknown")
@@ -171,6 +182,9 @@ def analyze_scene(
         "narration_hint": str(parsed.get("narration_hint") or "").strip(),
         "raw": raw[:1000],
     }
+    if quality is not None:
+        result["quality"] = quality
+    return result
 
 
 def analyze_scenes(
@@ -184,7 +198,7 @@ def analyze_scenes(
     force: bool = False,
     context: str = "",
     content_language: str = "zh",
-) -> None:
+) -> list[QualityFlag]:
     cache = {} if force or not cache_path else (read_json(cache_path, {}) or {})
     settings_key = f"{content_language}|{model}|{PROMPT_VERSION}|{max_width}|{context}"
     if cache.get("settings") != settings_key:
@@ -204,7 +218,7 @@ def analyze_scenes(
         LOG.info("VLM analysis cache hit (%d scenes)", len(scenes))
         if cache_path:
             atomic_write_json(cache_path, cache)
-        return
+        return _collect_quality(scenes, scene_cache)
 
     LOG.info("Analyzing %d scenes with the local VLM (%s)...", len(pending), model)
     completed = 0
@@ -238,6 +252,11 @@ def analyze_scenes(
                     "details": [],
                     "mood": "",
                     "narration_hint": "",
+                    "quality": {
+                        "code": "vlm.scene_failed",
+                        "params": {"scene": scene.id, "error": str(exc)[:200]},
+                        "severity": "warning",
+                    },
                 }
             scene_cache[key] = result
             _apply(scene, result)
@@ -254,6 +273,25 @@ def analyze_scenes(
 
     if cache_path:
         atomic_write_json(cache_path, cache)
+    return _collect_quality(scenes, scene_cache)
+
+
+def _collect_quality(scenes: list[Scene], scene_cache: dict[str, Any]) -> list[QualityFlag]:
+    flags: list[QualityFlag] = []
+    for scene in scenes:
+        key = f"{scene.id}:{scene.start:.3f}:{scene.end:.3f}"
+        quality = (scene_cache.get(key) or {}).get("quality")
+        if not isinstance(quality, dict) or not quality.get("code"):
+            continue
+        params = quality.get("params")
+        flags.append(
+            QualityFlag(
+                code=str(quality["code"]),
+                params=params if isinstance(params, dict) else {},
+                severity=str(quality.get("severity") or "warning"),
+            )
+        )
+    return flags
 
 
 def _apply(scene: Scene, result: dict[str, Any]) -> None:
