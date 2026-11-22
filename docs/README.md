@@ -29,6 +29,7 @@ Language policy / 语言策略: **all documentation is bilingual.**
 | Development / 开发文档 | [zh-CN/DEVELOPMENT.md](zh-CN/DEVELOPMENT.md) | [en/DEVELOPMENT.md](en/DEVELOPMENT.md) |
 | Desktop and multi-frontend architecture / 桌面版与多前端架构 | [zh-CN/DESKTOP_ARCHITECTURE.md](zh-CN/DESKTOP_ARCHITECTURE.md) | [en/DESKTOP_ARCHITECTURE.md](en/DESKTOP_ARCHITECTURE.md) |
 | Localization / 多语言与本地化 | [zh-CN/LOCALIZATION.md](zh-CN/LOCALIZATION.md) | [en/LOCALIZATION.md](en/LOCALIZATION.md) |
+| Language and voice specification / 语言与音色规范 | [zh-CN/LANGUAGES.md](zh-CN/LANGUAGES.md) | [en/LANGUAGES.md](en/LANGUAGES.md) |
 | Roadmap / 路线图 | [zh-CN/ROADMAP.md](zh-CN/ROADMAP.md) | [en/ROADMAP.md](en/ROADMAP.md) |
 | Glossary / 术语表 | [GLOSSARY.md](GLOSSARY.md) | [GLOSSARY.md](GLOSSARY.md) |
 | Changelog / 变更记录 | [CHANGELOG.zh-CN.md](../CHANGELOG.zh-CN.md) | [CHANGELOG.md](../CHANGELOG.md) |

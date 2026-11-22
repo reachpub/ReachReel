@@ -118,7 +118,7 @@ The installed command is `reachreel`.
 - Log messages and internal errors are canonical English.
 - User-visible messages should be rendered through `reachreel.i18n.t()` once the i18n layer lands.
 - Keep language-specific prompt text out of Python source. Prompt packs belong in `src/reachreel/prompts/<language>/`.
-- Do not merge UI language and content language into one setting.
+- Do not merge UI language and content language into one setting. Language settings are BCP 47 tags and engine-internal codes stay inside `engines/`: see `docs/en/LANGUAGES.md`.
 - CI must reject CJK characters in Python source outside `prompts/` and `locales/` (`apdev check-chars` with `scripts/apdev_charset.json`; full-width punctuation is allowed because it is parsing data).
 - Dependency direction must stay acyclic; `apdev check-imports` runs in CI.
 
