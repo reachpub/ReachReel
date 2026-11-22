@@ -117,8 +117,9 @@ target_chars ≈ duration × speech_chars_per_second × narration_density
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `tts_engine` | `kokoro` | `kokoro` 或 `say`（macOS 调试用） |
+| `tts_language` | `""` | 配音语言，BCP 47 标签（`zh-CN`、`en-US` 等）。留空跟随 `content_language`。引擎内部代码不外露；音色语言与它不一致会直接报错，详见 [LANGUAGES.md](LANGUAGES.md)。目前 `kokoro` 只有 `zh-CN` 通过验证 |
 | `kokoro_model` | `mlx-community/Kokoro-82M-4bit` | Kokoro MLX 模型 |
-| `voice` | `zf_xiaoxiao` | 中文音色 |
+| `voice` | `zf_xiaoxiao` | Kokoro 音色；音色名自带语言（`zf_` 普通话、`af_` 美式英语、`bf_` 英式英语） |
 | `tts_speed` | `1.0` | 基础语速；1.0 正常，>1 更快 |
 | `say_voice` | `Tingting` | `say` 引擎的音色 |
 
@@ -144,7 +145,7 @@ Kokoro 中文音色：
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `whisper_model` | `mlx-community/whisper-large-v3-turbo` | mlx-whisper 模型 |
-| `asr_language` | `zh` | 识别语言 |
+| `asr_language` | `""` | Whisper 识别提示；留空跟随 `content_language` 的主语言子标签 |
 | `subtitle_text` | `script` | `script`：原稿文字 + Whisper 时间戳；`asr`：直接用 Whisper 文字 |
 | `subtitle_max_chars` | `18` | 每行最多字数 |
 | `subtitle_max_lines` | `2` | 每条字幕最多行数 |
@@ -385,6 +386,7 @@ max_speedup = 1.32
 
 # TTS
 tts_engine = "kokoro"
+tts_language = "zh-CN"      # BCP 47；留空跟随 content_language
 kokoro_model = "mlx-community/Kokoro-82M-4bit"
 voice = "zf_xiaoxiao"
 tts_speed = 1.0
@@ -392,7 +394,7 @@ say_voice = "Tingting"
 
 # 字幕
 whisper_model = "mlx-community/whisper-large-v3-turbo"
-asr_language = "zh"
+asr_language = ""            # 留空跟随 content_language
 subtitle_text = "script"
 subtitle_max_chars = 18
 subtitle_max_lines = 2

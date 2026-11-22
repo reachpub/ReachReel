@@ -8,6 +8,9 @@
 
 ### Added
 
+- `src/reachreel/languages.py`: one registry of language profiles per `docs/en/LANGUAGES.md`, mapping BCP 47 tags to per-language defaults (speech rate, subtitle line length, font, engine code, dependency extra). Engine codes such as Kokoro's `a`/`b`/`z` now live only there.
+- `tts_language` (BCP 47, `--tts-language`) and the voice/language guard: an unsupported tag or a voice whose language disagrees fails with the list of validated tags instead of producing a wrong-language voiceover that still passes QA. `reachreel doctor` prints the resolved `content` / `tts` / `asr` axes and the engine code.
+- `doctor` reports the resolved TTS language and marks a planned language as missing.
 - `docs/en/LANGUAGES.md` and its Chinese counterpart define the language and voice specification: BCP 47 tags only, four separate language axes, one language-profile registry, an engine capability contract, per-language dependency extras, and the validation gate a language must pass before it is called supported. Today only `zh-CN` TTS passes that gate.
 - `render` warns when `output_height` is 0 and the source is larger than 1080p on its short side, because such a run silently keeps 4K, produces a much larger file, and makes the subtitle size look small. Found by running the Niagara 4K clip end to end.
 - Representative-frame deduplication for the VLM stage: each extracted frame is thumbnailed to 16x16 grayscale and dropped when it barely differs from the last kept frame. New setting `vlm_frame_dedup` (default `4.0`, `0` disables) and `--vlm-dedup`; a static long shot now sends one frame instead of three, and the threshold is part of the VLM cache key.
@@ -27,6 +30,7 @@
 
 ### Changed
 
+- `asr_language` now defaults to empty, which means "follow the primary subtag of `content_language`"; Chinese content still resolves to `zh`, so nothing changes for the supported pipeline.
 - Hard subtitles now default to white text with a black outline and a soft shadow (`BorderStyle=1`, `subtitle_render = "outline"`), instead of the translucent black box that hid a large part of the frame. The stroke is about 6% of `subtitle_size` and can be overridden with `subtitle_outline` / `--subtitle-outline`.
 - `subtitle_render = "box"` (or `--subtitle-render box`) restores the old look, with its padding now configurable via `subtitle_box_padding` / `--subtitle-box-padding`; `subtitle_render = "none"` draws plain white text without stroke or shadow. Work directories that recorded `render_settings` keep their previous mode.
 - Supported platform narrowed to macOS 14+ on Apple silicon; Intel macOS is not targeted, and CI pins the current arm64 label.

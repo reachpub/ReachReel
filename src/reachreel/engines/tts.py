@@ -12,6 +12,12 @@ from pathlib import Path
 from ..core.config import Settings
 from ..core.util import run
 from ..domain.models import NarrationSegment, QualityFlag
+from ..languages import (
+    LanguageProfile,
+    require_tts,
+    require_voice_match,
+    resolve_tts_language,
+)
 
 LOG = logging.getLogger("reachreel.engines.tts")
 
@@ -60,6 +66,19 @@ class KokoroEngine:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._model = None
+        self._lang_code: str | None = None
+
+    def language(self) -> LanguageProfile:
+        """Resolve and validate the pronunciation language for this run."""
+        profile = resolve_tts_language(
+            tts_language=self.settings.tts_language,
+            content_language=self.settings.content_language,
+            voice=self.settings.voice,
+        )
+        # Status first: "English is planned" is more useful than "wrong voice".
+        self._lang_code = require_tts(profile, "kokoro")
+        require_voice_match(profile, self.settings.voice)
+        return profile
 
     def _load(self):
         if self._model is not None:
@@ -78,6 +97,9 @@ class KokoroEngine:
         import numpy as np
 
         model = self._load()
+        if self._lang_code is None:
+            self.language()
+        lang_code = self._lang_code
         chunks = _split_for_tts(text)
         if not chunks:
             raise RuntimeError("TTS text is empty")
@@ -88,7 +110,7 @@ class KokoroEngine:
                 model.generate(
                     chunk,
                     voice=self.settings.voice,
-                    lang_code="z",
+                    lang_code=lang_code,
                     speed=speed,
                 )
             )
@@ -140,10 +162,30 @@ class KokoroEngine:
 
 
 class SayEngine:
-    """Development fallback. Chinese voice availability depends on macOS."""
+    """Development fallback on macOS. Voices depend on what the system has.
+
+    ``say`` can speak languages that Kokoro cannot yet, so it accepts planned
+    profiles but says so loudly instead of pretending the pair is validated.
+    """
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
+        self._warned = False
+
+    def language(self) -> LanguageProfile:
+        profile = resolve_tts_language(
+            tts_language=self.settings.tts_language,
+            content_language=self.settings.content_language,
+            voice=self.settings.say_voice,
+        )
+        if profile.status != "supported" and not self._warned:
+            LOG.warning(
+                "say is a debug engine: %s is not a validated voiceover language "
+                "(see docs/en/LANGUAGES.md)",
+                profile.tag,
+            )
+            self._warned = True
+        return profile
 
     def synthesize(self, text: str, out_wav: Path, *, speed: float = 1.0) -> float:
         if shutil.which("say") is None:

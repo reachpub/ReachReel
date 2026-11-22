@@ -250,6 +250,7 @@ reachreel run VIDEO [options]
 | `--no-bgm` | Off | Do not mix BGM |
 | `--voice NAME` | `zf_xiaoxiao` | Kokoro Chinese voice |
 | `--tts ENGINE` | `kokoro` | `kokoro` or `say` (for debugging) |
+| `--tts-language TAG` | Follows content language | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`); the voice must match it. Only `zh-CN` is validated today |
 | `--vlm-model NAME` | `qwen3-vl:8b-instruct` | Visual understanding model |
 | `--llm-model NAME` | `qwen3:30b-instruct` | Script-writing model |
 | `--whisper-model NAME` | `mlx-community/whisper-large-v3-turbo` | Subtitle model |

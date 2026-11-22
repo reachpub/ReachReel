@@ -35,6 +35,7 @@ def _overrides(args: argparse.Namespace) -> dict:
         "scene_threshold": getattr(args, "scene_threshold", None),
         "voice": getattr(args, "voice", None),
         "tts_engine": getattr(args, "tts", None),
+        "tts_language": getattr(args, "tts_language", None),
         "whisper_model": getattr(args, "whisper_model", None),
         "style": getattr(args, "style", None),
         "brief": getattr(args, "brief", None),
@@ -129,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--llm-model", default=None)
         p.add_argument("--voice", default=None, help=t("cli.voice"))
         p.add_argument("--tts", choices=["kokoro", "say"], default=None)
+        p.add_argument("--tts-language", default=None, help=t("cli.tts_language"))
         p.add_argument("--whisper-model", default=None)
         p.add_argument("--vlm-workers", type=int, default=None, help=t("cli.vlm_workers"))
         p.add_argument("--vlm-frames", type=int, default=None, help=t("cli.vlm_frames"))

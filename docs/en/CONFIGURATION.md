@@ -117,8 +117,9 @@ For example, 90 seconds at 3.9 characters/second and 0.5 density → about 175 c
 | Field | Default | Description |
 |---|---|---|
 | `tts_engine` | `kokoro` | `kokoro` or `say` (for macOS debugging) |
+| `tts_language` | `""` | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`, ...). Empty follows `content_language`. Engine codes stay internal, and a voice whose language disagrees is rejected; see [LANGUAGES.md](LANGUAGES.md). Only `zh-CN` is validated for `kokoro` so far |
 | `kokoro_model` | `mlx-community/Kokoro-82M-4bit` | Kokoro MLX model |
-| `voice` | `zf_xiaoxiao` | Chinese voice |
+| `voice` | `zf_xiaoxiao` | Kokoro voice; its name carries the language (`zf_` = Mandarin, `af_` = American English, `bf_` = British English) |
 | `tts_speed` | `1.0` | Base speech rate; 1.0 is normal, >1 is faster |
 | `say_voice` | `Tingting` | Voice for the `say` engine |
 
@@ -144,7 +145,7 @@ Kokoro Chinese voices:
 | Field | Default | Description |
 |---|---|---|
 | `whisper_model` | `mlx-community/whisper-large-v3-turbo` | mlx-whisper model |
-| `asr_language` | `zh` | Recognition language |
+| `asr_language` | `""` | Whisper recognition hint; empty follows the primary subtag of `content_language` |
 | `subtitle_text` | `script` | `script`: script text + Whisper timestamps; `asr`: use Whisper text directly |
 | `subtitle_max_chars` | `18` | Maximum characters per line |
 | `subtitle_max_lines` | `2` | Maximum lines per subtitle cue |
@@ -385,6 +386,7 @@ max_speedup = 1.32
 
 # TTS
 tts_engine = "kokoro"
+tts_language = "zh-CN"      # BCP 47; empty follows content_language
 kokoro_model = "mlx-community/Kokoro-82M-4bit"
 voice = "zf_xiaoxiao"
 tts_speed = 1.0
@@ -392,7 +394,7 @@ say_voice = "Tingting"
 
 # Subtitles
 whisper_model = "mlx-community/whisper-large-v3-turbo"
-asr_language = "zh"
+asr_language = ""            # empty follows content_language
 subtitle_text = "script"
 subtitle_max_chars = 18
 subtitle_max_lines = 2

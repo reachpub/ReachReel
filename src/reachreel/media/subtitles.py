@@ -10,6 +10,7 @@ from typing import Any
 from ..core.config import Settings, normalize_subtitle_render
 from ..core.util import srt_timestamp
 from ..domain.models import Cue, NarrationSegment, QualityFlag
+from ..languages import resolve_asr_language
 
 LOG = logging.getLogger("reachreel.media.subtitles")
 
@@ -469,7 +470,7 @@ def build_subtitles(
         result = transcribe_with_mlx_whisper(
             narration_wav,
             model=settings.whisper_model,
-            language=settings.asr_language,
+            language=resolve_asr_language(settings.asr_language, settings.content_language),
         )
         if result is None and flags is not None:
             flags.append(

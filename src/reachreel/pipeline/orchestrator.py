@@ -1016,6 +1016,35 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
             t("doctor.installed") if found else t("doctor.missing"),
             found,
         )
+    for axis, value in (
+        ("content_language", settings.content_language),
+        ("tts_language", settings.tts_language or "(follows content_language)"),
+        ("asr_language", settings.asr_language),
+    ):
+        add(f"language.{axis}", axis, str(value), True, required=False)
+
+    try:
+        from ..languages import resolve_tts_language, supported_tags
+
+        profile = resolve_tts_language(
+            tts_language=settings.tts_language,
+            content_language=settings.content_language,
+            voice=settings.voice,
+        )
+        code = profile.tts.get(settings.tts_engine)
+        detail = f"{profile.tag} -> {settings.tts_engine}"
+        detail += f" {code}" if code else " (no code)"
+        if profile.status != "supported":
+            detail += " (planned, not validated)"
+        add("language.tts", "TTS language", detail, profile.status == "supported")
+    except ValueError as exc:
+        add(
+            "language.tts",
+            "TTS language",
+            f"{exc} (validated: {', '.join(supported_tags())})",
+            False,
+        )
+
     misaki = importlib.util.find_spec("misaki") is not None
     add(
         "module.misaki",

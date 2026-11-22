@@ -250,6 +250,7 @@ reachreel run VIDEO [options]
 | `--no-bgm` | 关 | 不混 BGM |
 | `--voice NAME` | `zf_xiaoxiao` | Kokoro 中文音色 |
 | `--tts ENGINE` | `kokoro` | `kokoro` 或 `say`（调试用） |
+| `--tts-language TAG` | 跟随成片语言 | 配音语言，BCP 47 标签（`zh-CN`、`en-US`），音色必须与之一致。目前只验证了 `zh-CN` |
 | `--vlm-model NAME` | `qwen3-vl:8b-instruct` | 画面理解模型 |
 | `--llm-model NAME` | `qwen3:30b-instruct` | 写稿模型 |
 | `--whisper-model NAME` | `mlx-community/whisper-large-v3-turbo` | 字幕模型 |

@@ -8,6 +8,9 @@
 
 ### 新增
 
+- 新增 `src/reachreel/languages.py`：按 `docs/en/LANGUAGES.md` 建立的唯一语言档案登记表，把 BCP 47 标签映射到各语言的默认值（语速、字幕行字数、字体、引擎代码、依赖 extra）。Kokoro 的 `a`/`b`/`z` 等引擎代码只存在于这里。
+- 新增 `tts_language`（BCP 47，`--tts-language`）与音色/语言护栏：不支持的语言标签、或音色语言与解析结果不一致时直接报错并列出已验证标签，而不是产出一段「能过 QA 但语言错了」的配音。`reachreel doctor` 会打印解析后的 `content` / `tts` / `asr` 三个维度与引擎代码。
+- `doctor` 报告解析后的 TTS 语言，并把计划中的语言标为缺失。
 - `docs/en/LANGUAGES.md` 与中文版定义了语言与音色规范：只使用 BCP 47 标签、四个独立的语言维度、唯一的语言档案登记表、引擎能力契约、按语言的依赖 extra，以及声明某语言「支持」前必须通过的验证门槛。目前只有 `zh-CN` 配音通过该门槛。
 - `render` 在 `output_height = 0` 且素材短边大于 1080 时给出警告：这种跑法会静默保持 4K，文件明显变大，字幕在画面上也偏小。该问题由 Niagara 4K 素材的完整实跑发现。
 - VLM 阶段的代表帧去重：每帧降采样成 16×16 灰度缩略图，与上一张保留帧区别过小就丢弃。新增配置 `vlm_frame_dedup`（默认 `4.0`，`0` 关闭）与 `--vlm-dedup`；静态长镜头现在只送 1 张而不是 3 张，阈值也计入 VLM 缓存 key。
@@ -28,6 +31,7 @@
 
 ### 变更
 
+- `asr_language` 默认改为空，含义是「跟随 `content_language` 的主语言子标签」；中文内容仍解析为 `zh`，所以对已验证的链路没有行为变化。
 - 硬字幕默认改为白字 + 黑描边 + 轻微阴影（`BorderStyle=1`，`subtitle_render = "outline"`），不再使用遮住大片画面的半透明黑底色块。描边宽度约为 `subtitle_size` 的 6%，可用 `subtitle_outline` / `--subtitle-outline` 覆盖。
 - `subtitle_render = "box"`（或 `--subtitle-render box`）可恢复旧观感，其内边距现在可用 `subtitle_box_padding` / `--subtitle-box-padding` 调整；`subtitle_render = "none"` 输出纯白字、无描边无阴影。已在 `render_settings` 中记录过的旧工作目录沿用原模式。
 - 支持平台收窄为 Apple Silicon 上的 macOS 14+；不支持 Intel macOS，CI 固定使用当前 arm64 标签。

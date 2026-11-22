@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..i18n import normalize_language
+from ..languages import normalize_tag
 from ..prompts import normalize_language as normalize_content_language
 
 
@@ -47,6 +48,9 @@ class Settings:
 
     # TTS
     tts_engine: str = "kokoro"  # kokoro | say
+    # BCP 47 tag for the voiceover language; empty follows content_language.
+    # Engine codes (Kokoro a/b/z, Whisper zh/en) never appear here.
+    tts_language: str = ""
     kokoro_model: str = "mlx-community/Kokoro-82M-4bit"
     voice: str = "zf_xiaoxiao"
     tts_speed: float = 1.0
@@ -54,7 +58,8 @@ class Settings:
 
     # ASR / subtitles
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
-    asr_language: str = "zh"
+    # Whisper hint; empty follows the primary subtag of content_language.
+    asr_language: str = ""
     subtitle_text: str = "script"  # script | asr
     subtitle_max_chars: int = 18
     subtitle_max_lines: int = 2
@@ -161,6 +166,9 @@ class Settings:
         settings.content_language = normalize_content_language(settings.content_language)
         settings.subtitle_preset = normalize_subtitle_preset(settings.subtitle_preset)
         settings.subtitle_render = normalize_subtitle_render(settings.subtitle_render)
+        settings.tts_language = normalize_tag(settings.tts_language) or str(
+            settings.tts_language or ""
+        ).strip()
         settings.bgm_root_resolved = Path(settings.bgm_dir).expanduser()
         return settings
 
