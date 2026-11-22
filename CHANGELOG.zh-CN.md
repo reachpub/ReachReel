@@ -6,6 +6,7 @@
 
 ### 新增
 
+- `render` 在 `output_height = 0` 且素材短边大于 1080 时给出警告：这种跑法会静默保持 4K，文件明显变大，字幕在画面上也偏小。该问题由 Niagara 4K 素材的完整实跑发现。
 - VLM 阶段的代表帧去重：每帧降采样成 16×16 灰度缩略图，与上一张保留帧区别过小就丢弃。新增配置 `vlm_frame_dedup`（默认 `4.0`，`0` 关闭）与 `--vlm-dedup`；静态长镜头现在只送 1 张而不是 3 张，阈值也计入 VLM 缓存 key。
 - CI 把「Python 源码无 CJK」检查拆成独立步骤，违规时直接给出文件与行号，而不是埋在完整测试输出里。
 - 新增提交信息校验：`scripts/check_commit_messages.py` 通过 `commit-message` pre-commit hook 与 CI 两条路径执行，检查 push 或 PR 新增的每个提交。

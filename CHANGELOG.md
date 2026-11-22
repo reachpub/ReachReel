@@ -6,6 +6,7 @@
 
 ### Added
 
+- `render` warns when `output_height` is 0 and the source is larger than 1080p on its short side, because such a run silently keeps 4K, produces a much larger file, and makes the subtitle size look small. Found by running the Niagara 4K clip end to end.
 - Representative-frame deduplication for the VLM stage: each extracted frame is thumbnailed to 16x16 grayscale and dropped when it barely differs from the last kept frame. New setting `vlm_frame_dedup` (default `4.0`, `0` disables) and `--vlm-dedup`; a static long shot now sends one frame instead of three, and the threshold is part of the VLM cache key.
 - CI runs the "no CJK in Python source" guard as its own step, so a violation reports the file and line instead of hiding inside the full test output.
 - Commit messages are now validated: `scripts/check_commit_messages.py` runs from the `commit-message` pre-commit hook and in CI over every commit a push or pull request adds.

@@ -251,7 +251,7 @@ ambient_duck_db = -8.0
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `output_height` | `0` | 输出高度；0 = 保持源高度 |
+| `output_height` | `0` | 输出高度；0 = 保持源高度。为 0 且素材短边超过 1080 时，`render` 会打印警告：成品保持源分辨率、字幕在 4K 画面上偏小；4K 素材建议传 `--height 1080` |
 | `output_fps` | `0` | 输出帧率；0 = 保持源帧率 |
 | `crf` | `18` | x264 CRF；越大文件越小 |
 | `preset` | `medium` | x264 preset：`veryfast` / `fast` / `medium` / `slow` |

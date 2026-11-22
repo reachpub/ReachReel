@@ -38,7 +38,7 @@ from reachreel.media.audio import (
     load_bgm_catalog,
     mix_filter_graph,
 )
-from reachreel.media.render import output_dimensions
+from reachreel.media.render import output_dimensions, unscaled_source_warning
 from reachreel.media.scenes import display_dimensions, select_representative_frames
 from reachreel.media.subtitles import (
     SUBTITLE_PRESETS,
@@ -99,6 +99,26 @@ class UnitTests(unittest.TestCase):
             select_representative_frames([b"\x00" * 4, b"\x00" * 9, b""]),
             [0, 1, 2],
         )
+
+    def test_unscaled_source_warning(self):
+        settings = Settings()
+        four_k = VideoInfo(
+            path="4k.mov", duration=90.0, width=3840, height=2160, fps=60.0, has_audio=True
+        )
+        portrait = VideoInfo(
+            path="p.mp4", duration=80.0, width=1080, height=1920, fps=30.0, has_audio=True
+        )
+        # 4K with output_height = 0 stays 4K: warn once, with the fix in the text.
+        message = unscaled_source_warning(four_k, settings)
+        self.assertIsNotNone(message)
+        self.assertIn("3840x2160", message)
+        self.assertIn("--height 1080", message)
+        # Choosing an output height silences it.
+        settings.output_height = 1080
+        self.assertIsNone(unscaled_source_warning(four_k, settings))
+        # 1080p portrait has a height above 1080 but no wasted pixels.
+        settings.output_height = 0
+        self.assertIsNone(unscaled_source_warning(portrait, settings))
 
     def test_place_segments(self):
         scenes = [Scene(id=1, start=0, end=4), Scene(id=2, start=4, end=8), Scene(id=3, start=8, end=12)]

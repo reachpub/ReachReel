@@ -54,6 +54,24 @@ def subtitle_style(settings: Settings) -> str:
     )
 
 
+def unscaled_source_warning(info, settings: Settings) -> str | None:
+    """Warn when a large source is rendered at its original size.
+
+    ``output_height = 0`` keeps the source resolution, which is fine for 1080p
+    footage but produces a huge file and comparatively tiny subtitles for 4K
+    input. Returning the message keeps the rule testable without FFmpeg.
+    """
+    if settings.output_height:
+        return None
+    if min(int(info.width or 0), int(info.height or 0)) <= 1080:
+        return None
+    return (
+        f"Source is {info.width}x{info.height} and output_height is 0, so the output "
+        f"stays at source resolution: the file will be large and {settings.subtitle_size}px "
+        "subtitles look small on a 4K frame. Pass --height 1080 to downscale."
+    )
+
+
 def render(
     *,
     video: Path,
@@ -78,11 +96,16 @@ def render(
             "Install: brew install ffmpeg-full"
         )
 
+    from .scenes import probe_video
+
+    info = probe_video(video)
+    warning = unscaled_source_warning(info, settings)
+    if warning:
+        LOG.warning(warning)
+
     if burned:
-        from .scenes import probe_video
         from .subtitles import write_ass_from_srt
 
-        info = probe_video(video)
         out_width, out_height = output_dimensions(info.width, info.height, settings)
         if settings.subtitle_size < 24:
             LOG.warning(

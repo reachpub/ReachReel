@@ -251,7 +251,7 @@ ambient_duck_db = -8.0
 
 | Field | Default | Description |
 |---|---|---|
-| `output_height` | `0` | Output height; 0 = keep the source height |
+| `output_height` | `0` | Output height; 0 = keep the source height. With 0 and a source whose short side is above 1080, `render` logs a warning: the file stays at source resolution and the subtitle size looks small on a 4K frame. Pass `--height 1080` for 4K footage |
 | `output_fps` | `0` | Output frame rate; 0 = keep the source frame rate |
 | `crf` | `18` | x264 CRF; higher means a smaller file |
 | `preset` | `medium` | x264 preset: `veryfast` / `fast` / `medium` / `slow` |
