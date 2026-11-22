@@ -24,6 +24,9 @@ class Settings:
     vlm_workers: int = 2
     vlm_frames_per_scene: int = 3
     vlm_max_width: int = 768
+    # Mean absolute difference (0-255) between 16x16 grayscale thumbnails below
+    # which a frame counts as a duplicate of the previous kept one. 0 disables it.
+    vlm_frame_dedup: float = 4.0
     llm_temperature: float = 0.6
 
     # Scene detection

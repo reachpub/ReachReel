@@ -187,6 +187,25 @@ def analyze_scene(
     return result
 
 
+def settings_key(
+    *,
+    content_language: str,
+    model: str,
+    max_width: int,
+    frame_dedup: float,
+    context: str,
+) -> str:
+    """Cache key for one VLM configuration.
+
+    Every input that changes the analysis belongs here: language, model, prompt
+    version, frame width, the duplicate-frame threshold, and the user brief.
+    """
+    return (
+        f"{content_language}|{model}|{PROMPT_VERSION}|{max_width}|"
+        f"{frame_dedup:.2f}|{context}"
+    )
+
+
 def analyze_scenes(
     scenes: list[Scene],
     *,
@@ -199,15 +218,22 @@ def analyze_scenes(
     force: bool = False,
     context: str = "",
     content_language: str = "zh",
+    frame_dedup: float = 0.0,
 ) -> list[QualityFlag]:
     cache = {} if force or not cache_path else (read_json(cache_path, {}) or {})
-    settings_key = f"{content_language}|{model}|{PROMPT_VERSION}|{max_width}|{context}"
-    if cache.get("settings") != settings_key:
-        cache = {"settings": settings_key, "scenes": {}}
+    settings_key_value = settings_key(
+        content_language=content_language,
+        model=model,
+        max_width=max_width,
+        frame_dedup=frame_dedup,
+        context=context,
+    )
+    if cache.get("settings") != settings_key_value:
+        cache = {"settings": settings_key_value, "scenes": {}}
     scene_cache: dict[str, Any] = cache.setdefault("scenes", {})
     if shared_cache_path is not None and not force:
         shared = read_json(shared_cache_path, {}) or {}
-        if shared.get("settings") == settings_key:
+        if shared.get("settings") == settings_key_value:
             for key, value in (shared.get("scenes") or {}).items():
                 scene_cache.setdefault(key, value)
 
@@ -225,7 +251,7 @@ def analyze_scenes(
         if cache_path:
             atomic_write_json(cache_path, cache)
         if shared_cache_path is not None:
-            _write_shared(shared_cache_path, settings_key, scene_cache)
+            _write_shared(shared_cache_path, settings_key_value, scene_cache)
         return _collect_quality(scenes, scene_cache)
 
     LOG.info("Analyzing %d scenes with the local VLM (%s)...", len(pending), model)
@@ -282,7 +308,7 @@ def analyze_scenes(
     if cache_path:
         atomic_write_json(cache_path, cache)
     if shared_cache_path is not None:
-        _write_shared(shared_cache_path, settings_key, scene_cache)
+        _write_shared(shared_cache_path, settings_key_value, scene_cache)
     return _collect_quality(scenes, scene_cache)
 
 

@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 新增
+
+- VLM 阶段的代表帧去重：每帧降采样成 16×16 灰度缩略图，与上一张保留帧区别过小就丢弃。新增配置 `vlm_frame_dedup`（默认 `4.0`，`0` 关闭）与 `--vlm-dedup`；静态长镜头现在只送 1 张而不是 3 张，阈值也计入 VLM 缓存 key。
+- CI 把「Python 源码无 CJK」检查拆成独立步骤，违规时直接给出文件与行号，而不是埋在完整测试输出里。
+- 混音 filter graph 单元测试：`mix_filter_graph()` 抽成纯函数构造侧链图，覆盖仅旁白、仅环境音、仅 BGM、双路侧链、环境音音量为 0、压低比上下限。
+- `tests/integration/test_scenes.py`：只依赖 FFmpeg 的 fixture，三色片段带 2s / 4s 已知切点用于 `detect_scenes`，另有无音轨 / 单声道 / 5.1 片段断言 `probe_video` 的声道数，以及 90° / 180° / 270° 片段断言编码尺寸与显示尺寸。
+- `tests/integration/test_timeline.py`：覆盖真实 WAV 上的旁白 `atempo` 适配，以及本来就能放下的时间轴不被改动。
+- `tests/integration/test_smoke.py::OnlyReuseTest`：用产物哈希断言 `run --only tts`、`--only mix,render`、`--only qa` 都不会重跑前面的阶段。
+- 时间轴边界单元测试：空列表、无场景、未知场景 id、旁白超长告警、以及片段短于 `tail_padding` 的情况。
+
 ### 变更
 
 - 支持平台收窄为 Apple Silicon 上的 macOS 14+；不支持 Intel macOS，CI 固定使用当前 arm64 标签。
@@ -13,6 +23,7 @@
 ### 修复
 
 - CI 改用 `macos-15`：`macos-14` 标签已下线，排队任务会报错 “The configuration 'macos-14-arm64-us-xl' is not supported”。
+- `render --crf` 之前只是被解析、从未生效；现在和 `--height` / `--fps` 一样写入 `Settings.crf`，并有测试断言 manifest 的 `render_settings` 会被复用、同时 CLI 参数优先。
 
 ## [0.2.0] - 2026-11-22
 

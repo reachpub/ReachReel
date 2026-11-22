@@ -67,6 +67,7 @@ output_fps = 30
 | `vlm_workers` | `2` | VLM concurrency; higher is faster but uses more memory |
 | `vlm_frames_per_scene` | `3` | Number of keyframes extracted per scene |
 | `vlm_max_width` | `768` | Long-edge pixel size of extracted frames; smaller is faster and uses less memory |
+| `vlm_frame_dedup` | `4.0` | Frames whose 16x16 grayscale difference from the previous kept frame is below this are dropped before the VLM call; `0` disables it and sends every frame |
 | `llm_temperature` | `0.6` | Script-writing temperature; lower is steadier, higher is more varied |
 
 ---
@@ -84,7 +85,7 @@ Tuning suggestions:
 
 - Continuous single take / slow pan: lower `scene_threshold` to `0.22–0.26`, or increase `max_scene_seconds`.
 - Fast cuts / action footage: raise `scene_threshold` to `0.38–0.45` to avoid fragmented scenes.
-- VLM too slow: increase `max_scene_seconds` (fewer scenes) and reduce `vlm_frames_per_scene`.
+- VLM too slow: increase `max_scene_seconds` (fewer scenes) and reduce `vlm_frames_per_scene`. `vlm_frame_dedup` already collapses static shots to a single frame; raise it when a slow pan still sends near-identical frames.
 
 ---
 
@@ -348,6 +349,7 @@ llm_model = "qwen3:30b-instruct"
 vlm_workers = 2
 vlm_frames_per_scene = 3
 vlm_max_width = 768
+vlm_frame_dedup = 4.0
 llm_temperature = 0.6
 
 # Scenes

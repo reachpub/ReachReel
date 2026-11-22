@@ -358,6 +358,8 @@ VLM 文件沿用 `vlm_cache.json` 的结构。`cache_dir` 可改根目录；`cac
 - 用 `ffmpeg -ss T -i video -frames:v 1 -vf scale=...` 抽帧；
 - `ThreadPoolExecutor` 并发 4；
 - 输出 `frames/scene_XXXX_YY.jpg`。
+- 随后做去重：每帧降采样成 16×16 灰度缩略图，如果与上一张保留帧的平均绝对像素差低于 `vlm_frame_dedup`（默认 `4.0`，`0` 关闭），就删掉该文件并从 `scenes.json` 的 `frames` 里移除。`select_representative_frames` 是纯函数，所以规则不依赖 FFmpeg 也能做单测。
+- 该阈值计入 VLM 缓存 key（`engines.vlm.settings_key`），因为它改变了模型实际看到的帧。
 
 ### 5.3 VLM 分析
 
@@ -672,22 +674,23 @@ reachreel run /tmp/vf_test.mp4 \
 
 当前：
 
-- `tests/unit/test_units.py`：时间戳、字幕切分、JSON 解析、时间轴落点、字幕不丢字。
-- `tests/unit/test_qa.py`：SRT 解析、QA 退出码、settings 快照、`[qa]` 阈值、astats 解析、字幕边距、逐句对齐、`--only` 解析。
+- `tests/unit/test_units.py`：时间戳、字幕切分、JSON 解析、时间轴落点、字幕不丢字、`mix_filter_graph` 侧链图、TTS 重试/隔离、共享缓存键。
+- `tests/unit/test_qa.py`：SRT 解析、QA 退出码、settings 快照、`[qa]` 阈值、astats 解析、字幕边距、逐句对齐、`--only` 解析，以及 manifest `render_settings` 复用（同时断言 CLI 参数优先）。
 - `tests/unit/test_i18n_prompts.py`：语言目录键一致、prompt 包、英文 prompt 卫生、Python 源码无 CJK 检查。
 - `tests/integration/test_smoke.py`：可选的端到端 smoke（`REACHREEL_INTEGRATION=1`），用 macOS `say` 在合成素材上通过真实 CLI 跑 `tts → subtitle --asr none → mix --no-bgm → render --no-burn → qa`；不需要模型或网络。
-- CI：`.github/workflows/ci.yml` 在 `macos-15`（Apple Silicon）上对 Python 3.11 和 3.12 跑 Ruff、单元测试和 `uv build`。标签是刻意固定的：GitHub 会定期下线 macOS 镜像，被下线的标签会让所有任务在排队阶段就失败，报的是 `<配置> is not supported`，而不是测试失败。只使用当前仍支持的 arm64 标签，不支持 Intel macOS。
+- `tests/integration/test_scenes.py`：可选的、只依赖 FFmpeg 的 fixture——三色片段在 2s / 4s 有已知切点，用于断言 `detect_scenes`（切点边界、`min_len` 合并、`max_len` 切分）；另有无音轨 / 单声道 / 5.1 片段断言 `probe_video` 的声道数，以及 90° / 180° / 270° 片段断言编码尺寸与显示尺寸。
+- `tests/integration/test_timeline.py`：可选的旁白加速 fixture——生成的 WAV 总长超过片长，`place_segments` 必须调用 `atempo`、改写 `audio_path` 并缩短时长；不需要加速时必须原样保留文件。
+- `tests/integration/test_smoke.py::OnlyReuseTest`：可选的 `run --only` 复用 smoke，对比 `scenes.json` / `narration.wav` / `subtitles.srt` 的哈希，证明前面的阶段没有被重跑。
+- CI：`.github/workflows/ci.yml` 在 `macos-15`（Apple Silicon）上对 Python 3.11 和 3.12 跑 Ruff、单元测试和 `uv build`。标签是刻意固定的：GitHub 会定期下线 macOS 镜像，被下线的标签会让所有任务在排队阶段就失败，报的是 `<配置> is not supported`，而不是测试失败。只使用当前仍支持的 arm64 标签，不支持 Intel macOS。集成测试不进 CI，本地用 `REACHREEL_INTEGRATION=1` 跑。
 - 目前没有 golden output。
 
 建议补充：
 
-1. 场景检测的 fixture（已知切点）；
-2. 时间轴边界（超长/超短/无场景）；
-3. 混音 filter graph 的单元测试（拼字符串即可）；
-4. 断言 `--only` 复用的完整 `run` smoke（不调用模型）；
-5. `render` 的 manifest 设置复用；
-6. 旋转元数据/竖屏；
-7. 无音轨 / 单声道 / 5.1 音轨。
+1. 覆盖全部阶段组合的 `run --only` 复用 smoke；
+2. 用真实素材调 QA 阈值（现有 fixture 都是合成的）；
+3. 旋转竖屏片的端到端阶段 smoke。
+
+已完成：场景检测 fixture、混音 filter graph、`render` 复用 manifest 设置、无音轨 / 单声道 / 5.1 探测、旋转探测、时间轴边界与 `atempo` 适配、`run --only` 复用。
 
 ---
 

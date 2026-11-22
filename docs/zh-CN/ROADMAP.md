@@ -120,20 +120,20 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 
 **验收**：好片返回 0，坏片能定位到具体检查项；阈值调参不再改代码。
 
-### P0-6 测试与 CI
+### P0-6 测试与 CI（已完成）
 
-- 场景检测 fixture；
-- 字幕不丢字 property test（已完成）；
-- 时间轴边界测试（已完成基础版）；
-- 混音 filter graph 单元测试；
-- `render` 复用 manifest 设置；
-- 阶段命令 smoke test（已完成手动版）；
-- QA SRT 解析/退出码测试（已完成）；新增 QA 阈值、astats 解析、字幕边距、逐句对齐、`--only` 解析测试；
-- `run --only` / `--dry-run` smoke test（已完成基础版）；
-- 无音轨/单声道/5.1/旋转；
-- GitHub Actions：macOS runner + lint + unit tests（不跑大模型）。
+- 场景检测 fixture：`tests/integration/test_scenes.py` 用三色片段造出 2s / 4s 的已知切点，断言切点边界、`min_len` 合并和 `max_len` 切分；
+- 字幕不丢字 property test；
+- 时间轴边界测试：空列表、无场景、未知场景 id、旁白超长只告警不抛异常、片段短于 `tail_padding`、以及不需要加速的情况；真实 `atempo` 改名与时长缩短由 `tests/integration/test_timeline.py` 覆盖；
+- 混音 filter graph 单元测试：`mix_filter_graph()` 抽成纯字符串拼接，覆盖仅旁白、仅环境音、仅 BGM、双路侧链、环境音音量为 0、压低比上下限；
+- `render` 复用 manifest 设置：覆盖 `_workdir_context` 的合并顺序，并断言 CLI 参数仍然优先；
+- 阶段命令 smoke test：smoke 链路在中文/空格路径上分步跑 `tts` / `subtitle` / `mix` / `render` / `qa` / `licenses`；
+- QA SRT 解析/退出码测试，以及 QA 阈值、astats 解析、字幕边距、逐句对齐、`--only` 解析测试；
+- `run --only` 复用 smoke：`tests/integration/test_smoke.py::OnlyReuseTest` 对比 `scenes.json` / `narration.wav` / `subtitles.srt` 的哈希，证明 `--only tts`、`--only mix,render`、`--only qa` 都不会重跑前面的阶段；
+- 无音轨 / 单声道 / 5.1 的探测层（`probe_video` 报 0 / 1 / 6 声道）与旋转端到端（用 `-display_rotation` 写入 90° / 180° / 270°，断言编码尺寸与显示尺寸）；
+- GitHub Actions：`macos-15` runner + lint + unit tests（不跑大模型）。
 
-**验收**：PR 必须过 lint + tests；核心路径有回归测试。
+**验收**：PR 必须过 lint + 单元测试；核心路径有回归测试；集成 fixture 本地用 `REACHREEL_INTEGRATION=1` 跑。
 
 ### P0-7 缓存键与跨工作目录复用（已完成）
 
@@ -200,6 +200,7 @@ Windows/桌面端待做：
 
 ### P1-2 VLM 看片升级
 
+- 已完成：代表帧去重——VLM 调用前丢弃近似关键帧，静态长镜头从 3 张降到 1 张；
 - 不是均匀抽帧，而是按“画面变化/运动强度”选代表帧；
 - 镜头内动作识别（起跳、转身、水流方向）；
 - 去重：相似镜头合并描述；

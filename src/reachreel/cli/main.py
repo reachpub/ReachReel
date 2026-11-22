@@ -31,6 +31,7 @@ def _overrides(args: argparse.Namespace) -> dict:
         "llm_model": getattr(args, "llm_model", None),
         "vlm_workers": getattr(args, "vlm_workers", None),
         "vlm_frames_per_scene": getattr(args, "vlm_frames", None),
+        "vlm_frame_dedup": getattr(args, "vlm_dedup", None),
         "scene_threshold": getattr(args, "scene_threshold", None),
         "voice": getattr(args, "voice", None),
         "tts_engine": getattr(args, "tts", None),
@@ -41,6 +42,7 @@ def _overrides(args: argparse.Namespace) -> dict:
         "max_speedup": getattr(args, "max_speedup", None),
         "output_height": getattr(args, "height", None),
         "output_fps": getattr(args, "fps", None),
+        "crf": getattr(args, "crf", None),
         "subtitle_size": getattr(args, "subtitle_size", None),
         "subtitle_max_chars": getattr(args, "subtitle_chars", None),
         "subtitle_preset": getattr(args, "subtitle_preset", None),
@@ -127,6 +129,9 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--whisper-model", default=None)
         p.add_argument("--vlm-workers", type=int, default=None, help=t("cli.vlm_workers"))
         p.add_argument("--vlm-frames", type=int, default=None, help=t("cli.vlm_frames"))
+        p.add_argument(
+            "--vlm-dedup", type=float, default=None, help=t("cli.vlm_dedup")
+        )
         p.add_argument(
             "--scene-threshold",
             type=float,

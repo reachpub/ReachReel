@@ -40,6 +40,14 @@ jobs:
       - name: Lint
         run: uvx ruff@0.17.6 check src/reachreel tests
 
+      - name: Language gate (no CJK in Python source)
+        # Localized copy lives in locales/*.toml and prompts/*.toml only. Running
+        # this test on its own keeps the failure message focused on the file and
+        # line instead of burying it in the full suite output.
+        run: >-
+          .venv/bin/python -m unittest
+          tests.unit.test_i18n_prompts.I18nPromptTests.test_no_cjk_in_python_source -v
+
       - name: Unit tests
         run: .venv/bin/python -m unittest discover -s tests -v
 

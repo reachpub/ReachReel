@@ -67,6 +67,7 @@ output_fps = 30
 | `vlm_workers` | `2` | VLM 并发数；越大越快，但更吃内存 |
 | `vlm_frames_per_scene` | `3` | 每个镜头抽几张关键帧 |
 | `vlm_max_width` | `768` | 抽帧长边像素；越小越快、越省内存 |
+| `vlm_frame_dedup` | `4.0` | 抽帧后与上一张保留帧的 16×16 灰度差异低于该值就丢弃，可减少送进 VLM 的重复帧；`0` 表示关闭、全部发送 |
 | `llm_temperature` | `0.6` | 写稿温度；越低越稳，越高越发散 |
 
 ---
@@ -84,7 +85,7 @@ output_fps = 30
 
 - 一镜到底 / 慢摇：降低 `scene_threshold` 到 `0.22–0.26`，或增大 `max_scene_seconds`。
 - 快切 / 运动镜头：提高 `scene_threshold` 到 `0.38–0.45`，避免碎镜头。
-- VLM 太慢：增大 `max_scene_seconds`（减少场景数）、减少 `vlm_frames_per_scene`。
+- VLM 太慢：增大 `max_scene_seconds`（减少场景数）、减少 `vlm_frames_per_scene`。`vlm_frame_dedup` 已能把静态长镜头压缩成 1 张；慢摇镜头如果仍然送出近似帧，可以调高它。
 
 ---
 
@@ -348,6 +349,7 @@ llm_model = "qwen3:30b-instruct"
 vlm_workers = 2
 vlm_frames_per_scene = 3
 vlm_max_width = 768
+vlm_frame_dedup = 4.0
 llm_temperature = 0.6
 
 # 镜头

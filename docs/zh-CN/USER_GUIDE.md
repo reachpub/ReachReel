@@ -255,6 +255,7 @@ reachreel run VIDEO [options]
 | `--whisper-model NAME` | `mlx-community/whisper-large-v3-turbo` | 字幕模型 |
 | `--vlm-workers N` | `2` | VLM 并发数 |
 | `--vlm-frames N` | `3` | 每个镜头抽帧数 |
+| `--vlm-dedup X` | `4.0` | 与上一张保留帧的差异低于 `X` 的帧会被丢弃（`0` 表示关闭去重） |
 | `--scene-threshold X` | `0.32` | 镜头切换阈值；越低越敏感 |
 | `--style TEXT` | 内置 | 旁白风格提示 |
 | `--brief TEXT` | 空 | 拍摄地/人物/背景信息 |

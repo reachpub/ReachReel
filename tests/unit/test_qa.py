@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from reachreel.cli.main import build_parser, main
+from reachreel.cli.main import _workdir_context, build_parser, main
 from reachreel.core.config import Settings, settings_to_dict
 from reachreel.pipeline.orchestrator import (
     STAGE_ORDER,
@@ -114,6 +114,45 @@ class QATests(unittest.TestCase):
         self.assertTrue(review.review_script)
         mix = parser.parse_args(["mix", "/tmp/workdir", "--bgm-fade", "3"])
         self.assertEqual(mix.bgm_fade, 3.0)
+
+    def test_manifest_render_settings_are_reused_by_stage_commands(self):
+        parser = build_parser()
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            workdir.mkdir()
+            video = Path(tmp) / "clip.mp4"
+            video.write_bytes(b"stub")
+            manifest = {
+                "video": {"path": str(video)},
+                # The old partial snapshot must not win over render_settings.
+                "settings_snapshot": {"output_height": 1080, "crf": 20, "preset": "medium"},
+                "render_settings": {
+                    "output_height": 720,
+                    "crf": 18,
+                    "subtitle_size": 44,
+                    "subtitle_preset": "douyin",
+                    "subtitle_size_unit": "px",
+                    "subtitle_layout": "ass",
+                    "burn_subtitles": True,
+                },
+            }
+            (workdir / "manifest.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+
+            args = parser.parse_args(["render", str(workdir)])
+            _, reused, _ = _workdir_context(workdir, args, parser)
+            self.assertEqual(reused.output_height, 720)
+            self.assertEqual(reused.crf, 18)
+            self.assertEqual(reused.subtitle_size, 44)
+            self.assertEqual(reused.subtitle_preset, "douyin")
+
+            # CLI overrides still win over the manifest.
+            args = parser.parse_args(["render", str(workdir), "--height", "480", "--crf", "24"])
+            _, overridden, _ = _workdir_context(workdir, args, parser)
+            self.assertEqual(overridden.output_height, 480)
+            self.assertEqual(overridden.crf, 24)
+            self.assertEqual(overridden.subtitle_size, 44)
 
     def test_review_stages_stops_at_script(self):
         self.assertEqual(review_stages(STAGE_ORDER), ["probe", "vlm", "script"])

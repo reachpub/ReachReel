@@ -1,4 +1,5 @@
 import hashlib
+import itertools
 import json
 import tempfile
 import unittest
@@ -24,7 +25,8 @@ from reachreel.domain.models import (
 )
 from reachreel.domain.timeline import place_segments
 from reachreel.engines.tts import _synthesize_with_retries, synthesize_segments
-from reachreel.engines.vlm import PROMPT_VERSION, analyze_scenes
+from reachreel.engines.vlm import analyze_scenes
+from reachreel.engines.vlm import settings_key as vlm_settings_key
 from reachreel.generation.script import _extract_json_array
 from reachreel.i18n import set_language
 from reachreel.media.audio import (
@@ -34,9 +36,10 @@ from reachreel.media.audio import (
     bgm_license_markdown,
     bgm_metadata,
     load_bgm_catalog,
+    mix_filter_graph,
 )
 from reachreel.media.render import output_dimensions
-from reachreel.media.scenes import display_dimensions
+from reachreel.media.scenes import display_dimensions, select_representative_frames
 from reachreel.media.subtitles import (
     SUBTITLE_PRESETS,
     _cue_texts,
@@ -74,6 +77,29 @@ class UnitTests(unittest.TestCase):
         raw = '```json\n[{"scene_ids":[1],"text":"你好。"}]\n```'
         self.assertEqual(len(_extract_json_array(raw)), 1)
 
+    def test_select_representative_frames(self):
+        def flat(value: int) -> bytes:
+            return bytes([value] * 256)
+        self.assertEqual(select_representative_frames([]), [])
+        self.assertEqual(select_representative_frames([flat(0)]), [0])
+        # A static shot collapses to its first frame.
+        self.assertEqual(select_representative_frames([flat(0), flat(0), flat(1)]), [0])
+        # A gradual shift accumulates against the last kept frame: 3 < 4, 6 >= 4.
+        self.assertEqual(
+            select_representative_frames([flat(0), flat(3), flat(6), flat(9)]),
+            [0, 2],
+        )
+        # threshold 0 disables the filter.
+        self.assertEqual(
+            select_representative_frames([flat(0), flat(0)], threshold=0.0),
+            [0, 1],
+        )
+        # Mismatched or empty signatures are treated as distinct, not dropped.
+        self.assertEqual(
+            select_representative_frames([b"\x00" * 4, b"\x00" * 9, b""]),
+            [0, 1, 2],
+        )
+
     def test_place_segments(self):
         scenes = [Scene(id=1, start=0, end=4), Scene(id=2, start=4, end=8), Scene(id=3, start=8, end=12)]
         segments = [
@@ -85,6 +111,59 @@ class UnitTests(unittest.TestCase):
         self.assertGreaterEqual(segments[0].start, 0.7)
         self.assertGreater(segments[1].start, segments[0].end)
         self.assertLessEqual(segments[-1].end, 12.0)
+
+    def test_place_segments_empty_list(self):
+        self.assertEqual(place_segments([], [], 10.0, Settings()), [])
+
+    def test_place_segments_without_scenes_keeps_order(self):
+        segments = [
+            NarrationSegment(id=1, scene_ids=[1], text="a", duration=1.0),
+            NarrationSegment(id=2, scene_ids=[2], text="b", duration=1.0),
+        ]
+        settings = Settings()
+        place_segments(segments, [], 10.0, settings)
+        self.assertAlmostEqual(segments[0].start, settings.start_offset, places=3)
+        for previous, current in itertools.pairwise(segments):
+            self.assertGreaterEqual(
+                current.start, previous.end + settings.min_gap_seconds - 0.001
+            )
+        self.assertLessEqual(segments[-1].end, 10.0)
+
+    def test_place_segments_unknown_scene_id_falls_back_to_start_offset(self):
+        scenes = [Scene(id=1, start=0.0, end=4.0)]
+        segments = [NarrationSegment(id=1, scene_ids=[99], text="x", duration=1.0)]
+        settings = Settings()
+        place_segments(segments, scenes, 10.0, settings)
+        self.assertAlmostEqual(segments[0].start, settings.start_offset, places=3)
+
+    def test_place_segments_overlong_narration_is_reported_not_raised(self):
+        # Narration far longer than the clip and no audio attached, so no
+        # atempo can shorten it: the stage must survive and keep the order.
+        segments = [
+            NarrationSegment(id=i, scene_ids=[1], text="x", duration=8.0) for i in (1, 2, 3)
+        ]
+        settings = Settings()
+        with self.assertLogs("reachreel.domain.timeline", level="WARNING"):
+            result = place_segments(segments, [Scene(id=1, start=0, end=4)], 5.0, settings)
+        self.assertIs(result, segments)
+        self.assertEqual([segment.id for segment in segments], [1, 2, 3])
+        for previous, current in itertools.pairwise(segments):
+            self.assertGreater(current.start, previous.start)
+        self.assertGreater(segments[-1].end, 5.0)
+
+    def test_place_segments_shorter_than_tail_padding(self):
+        segments = [NarrationSegment(id=1, scene_ids=[1], text="x", duration=0.5)]
+        settings = Settings()
+        place_segments(segments, [Scene(id=1, start=0.0, end=0.3)], 0.4, settings)
+        self.assertAlmostEqual(segments[0].start, settings.start_offset, places=3)
+        self.assertAlmostEqual(segments[0].end, 1.2, places=3)
+
+    def test_place_segments_fits_without_speedup(self):
+        segments = [NarrationSegment(id=1, scene_ids=[1], text="x", duration=2.0)]
+        settings = Settings()
+        place_segments(segments, [Scene(id=1, start=0.0, end=9.0)], 10.0, settings)
+        self.assertEqual(segments[0].duration, 2.0)
+        self.assertEqual(segments[0].tts_speed, 1.0)
 
     def test_cues_do_not_drop_text(self):
         text = "第一次滑，小脸绷得像块冰。蓝黄小身影在紫色灯光下，像只试探雪地的企鹅。"
@@ -308,7 +387,14 @@ class UnitTests(unittest.TestCase):
 
     def test_vlm_shared_cache_reuse(self):
         scenes = [Scene(id=1, start=0.0, end=2.0)]
-        settings_key = f"zh|qwen3-vl:8b-instruct|{PROMPT_VERSION}|768|"
+        scene_settings = {
+            "content_language": "zh",
+            "model": "qwen3-vl:8b-instruct",
+            "max_width": 768,
+            "frame_dedup": 0.0,
+            "context": "",
+        }
+        settings_key = vlm_settings_key(**scene_settings)
         with tempfile.TemporaryDirectory() as tmp:
             shared = Path(tmp) / "shared.json"
             local = Path(tmp) / "vlm_cache.json"
@@ -324,15 +410,34 @@ class UnitTests(unittest.TestCase):
             flags = analyze_scenes(
                 scenes,
                 base_url="http://127.0.0.1:1",
-                model="qwen3-vl:8b-instruct",
+                model=scene_settings["model"],
                 cache_path=local,
                 shared_cache_path=shared,
-                max_width=768,
-                context="",
-                content_language="zh",
+                max_width=scene_settings["max_width"],
+                context=scene_settings["context"],
+                content_language=scene_settings["content_language"],
+                frame_dedup=scene_settings["frame_dedup"],
             )
         self.assertEqual(scenes[0].summary, "cached summary")
         self.assertEqual(flags, [])
+
+    def test_vlm_settings_key_includes_dedup(self):
+        base = {
+            "content_language": "zh",
+            "model": "qwen3-vl:8b-instruct",
+            "max_width": 768,
+            "context": "ski trip",
+        }
+        self.assertEqual(
+            vlm_settings_key(frame_dedup=4.0, **base),
+            vlm_settings_key(frame_dedup=4.0, **base),
+        )
+        # A different duplicate-frame threshold changes which frames are sent,
+        # so it must invalidate the VLM cache.
+        self.assertNotEqual(
+            vlm_settings_key(frame_dedup=0.0, **base),
+            vlm_settings_key(frame_dedup=4.0, **base),
+        )
 
     def test_tts_shared_cache_reuse(self):
         settings = Settings(tts_engine="say", voice="Tingting", kokoro_model="m")
@@ -429,6 +534,74 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(_parse_loudnorm_json(stderr)["input_i"], "-20.1")
         self.assertIsNone(_parse_loudnorm_json('{"input_i": "-inf"}'))
         self.assertIsNone(_parse_loudnorm_json("no json"))
+
+    def test_mix_filter_graph_narration_only(self):
+        settings = Settings()
+        graph = mix_filter_graph(
+            duration=10.0, has_ambient=False, has_bgm=False, settings=settings
+        )
+        self.assertEqual(len(graph), 2)
+        self.assertIn("channel_layouts=stereo[nar]", graph[0])
+        self.assertEqual(graph[-1], "[nar]anull[premix]")
+        self.assertNotIn("sidechaincompress", ";".join(graph))
+
+    def test_mix_filter_graph_ambient_only(self):
+        settings = Settings()
+        graph = mix_filter_graph(
+            duration=10.0, has_ambient=True, has_bgm=False, settings=settings
+        )
+        joined = ";".join(graph)
+        self.assertIn("asplit=2[nar][sc_amb]", joined)
+        self.assertIn("volume=0.160[amb]", joined)
+        self.assertIn("[amb][sc_amb]sidechaincompress=", joined)
+        self.assertNotIn("sc_bgm", joined)
+        self.assertIn("[nar][amb_duck]amix=inputs=2:duration=longest:normalize=0[premix]", joined)
+
+    def test_mix_filter_graph_bgm_only(self):
+        settings = Settings()
+        settings.bgm_volume = 0.2
+        graph = mix_filter_graph(
+            duration=10.0, has_ambient=False, has_bgm=True, settings=settings
+        )
+        joined = ";".join(graph)
+        self.assertIn("asplit=2[nar][sc_bgm]", joined)
+        self.assertIn("volume=0.200", joined)
+        self.assertIn("[2:a]aformat=", joined)
+        self.assertNotIn("sc_amb", joined)
+        self.assertIn("[nar][bgm_duck]amix=inputs=2", joined)
+
+    def test_mix_filter_graph_ambient_and_bgm(self):
+        settings = Settings()
+        settings.ambient_duck_db = -18.0
+        settings.bgm_duck_db = -24.0
+        graph = mix_filter_graph(
+            duration=10.0, has_ambient=True, has_bgm=True, settings=settings
+        )
+        joined = ";".join(graph)
+        self.assertIn("asplit=3[nar][sc_amb][sc_bgm]", joined)
+        self.assertIn("ratio=9.0", joined)  # ambient 18 dB / 2 db-per-ratio
+        self.assertIn("ratio=12.0", joined)  # bgm 24 dB / 2 db-per-ratio
+        self.assertIn("amix=inputs=3:duration=longest:normalize=0[premix]", joined)
+        self.assertTrue(graph[-1].endswith("[premix]"))
+
+    def test_mix_filter_graph_skips_zero_volume_ambient(self):
+        settings = Settings()
+        settings.ambient_volume = 0.0
+        graph = mix_filter_graph(
+            duration=10.0, has_ambient=True, has_bgm=False, settings=settings
+        )
+        self.assertNotIn("sidechaincompress", ";".join(graph))
+        self.assertEqual(graph[-1], "[nar]anull[premix]")
+
+    def test_mix_filter_graph_clamps_duck_ratios(self):
+        settings = Settings()
+        settings.ambient_duck_db = -1.0  # below the 2.0 floor
+        settings.bgm_duck_db = -400.0  # above the 20.0 ceiling
+        joined = ";".join(
+            mix_filter_graph(duration=5.0, has_ambient=True, has_bgm=True, settings=settings)
+        )
+        self.assertIn("ratio=2.0", joined)
+        self.assertIn("ratio=20.0", joined)
 
     def test_bgm_fade_filter(self):
         settings = Settings()

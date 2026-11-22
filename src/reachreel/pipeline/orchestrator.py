@@ -207,6 +207,7 @@ class Pipeline:
             self.frames_dir,
             per_scene=self.settings.vlm_frames_per_scene,
             width=self.settings.vlm_max_width,
+            dedup=self.settings.vlm_frame_dedup,
         )
         save_scenes(self.scenes_path, info, scenes)
         self._scenes = scenes
@@ -239,6 +240,7 @@ class Pipeline:
                 force=force,
                 context=self.settings.brief,
                 content_language=self.settings.content_language,
+                frame_dedup=self.settings.vlm_frame_dedup,
             )
         )
         info = self.load_video()

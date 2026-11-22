@@ -120,20 +120,20 @@ Implemented:
 
 **Acceptance**: a good cut returns 0, and a bad cut can be traced to a specific check; tuning thresholds no longer requires code changes.
 
-### P0-6 Tests and CI
+### P0-6 Tests and CI (done)
 
-- scene detection fixtures;
-- subtitle character-preservation property test (done);
-- timeline boundary tests (basic version done);
-- mix filter graph unit tests;
-- `render` reuses manifest settings;
-- stage command smoke test (manual version done);
-- QA SRT parsing/exit code tests (done); added QA threshold, astats parsing, subtitle margin, per-sentence alignment, and `--only` parsing tests;
-- `run --only` / `--dry-run` smoke test (basic version done);
-- no audio track/mono/5.1/rotation;
-- GitHub Actions: macOS runner + lint + unit tests (no large models).
+- scene detection fixtures: `tests/integration/test_scenes.py` builds a three-colour clip with cuts at 2 s / 4 s and asserts the reported boundaries, the `min_len` merge, and the `max_len` split;
+- subtitle character-preservation property test;
+- timeline boundary tests: empty list, no scenes, unknown scene id, overlong narration logs a warning instead of raising, clips shorter than `tail_padding`, and the no-speed-up case; the real `atempo` rewrite is covered by `tests/integration/test_timeline.py`;
+- mix filter graph unit tests: `mix_filter_graph()` is pure string construction; tests cover narration-only, ambient-only, BGM-only, both side-chains, zero ambient volume, and duck-ratio clamping;
+- `render` reuses manifest settings: `_workdir_context` merging is covered, including that CLI flags still win;
+- stage command smoke test: the smoke chain runs `tts` / `subtitle` / `mix` / `render` / `qa` / `licenses` as separate commands on a non-ASCII, space-containing workdir;
+- QA SRT parsing/exit code tests, plus QA threshold, astats parsing, subtitle margin, per-sentence alignment, and `--only` parsing tests;
+- `run --only` reuse smoke: `tests/integration/test_smoke.py::OnlyReuseTest` hashes `scenes.json` / `narration.wav` / `subtitles.srt` and proves `--only tts`, `--only mix,render`, and `--only qa` do not redo earlier stages;
+- no audio track / mono / 5.1 at probe level (`probe_video` reports 0 / 1 / 6 channels) and rotation end to end (90° / 180° / 270° clips written with `-display_rotation`, asserting coded vs display size);
+- GitHub Actions: `macos-15` runner + lint + unit tests (no large models).
 
-**Acceptance**: PRs must pass lint + tests; core paths have regression tests.
+**Acceptance**: PRs must pass lint + unit tests; core paths have regression tests; integration fixtures run locally with `REACHREEL_INTEGRATION=1`.
 
 ### P0-7 Cache keys and cross-workdir reuse (done)
 
@@ -200,6 +200,7 @@ See [LOCALIZATION.md §4](LOCALIZATION.md) (split table / migration steps / bann
 
 ### P1-2 VLM scene understanding upgrade
 
+- done: representative-frame deduplication — near-identical keyframes are dropped before the VLM call, so a static long shot sends one frame instead of three;
 - instead of uniform frame sampling, choose representative frames by "visual change/motion intensity";
 - in-scene action recognition (jumping, turning, water flow direction);
 - deduplication: merge descriptions of similar scenes;

@@ -59,12 +59,18 @@ class I18nPromptTests(unittest.TestCase):
 
     def test_no_cjk_in_python_source(self):
         root = Path(__file__).resolve().parents[2] / "src" / "reachreel"
-        cjk = re.compile(r"[\u4e00-\u9fff]")
-        for path in root.rglob("*.py"):
-            self.assertIsNone(
-                cjk.search(path.read_text(encoding="utf-8")),
-                f"CJK in Python source: {path}",
-            )
+        cjk = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+        offenders: list[str] = []
+        for path in sorted(root.rglob("*.py")):
+            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if cjk.search(line):
+                    offenders.append(f"{path.relative_to(root.parent.parent)}:{lineno}: {line.strip()}")
+        self.assertEqual(
+            offenders,
+            [],
+            "CJK in Python source; keep localized text in locales/*.toml or prompts/*.toml:\n"
+            + "\n".join(offenders),
+        )
 
     def test_english_scene_table_uses_english_labels(self):
         table = _scene_table(

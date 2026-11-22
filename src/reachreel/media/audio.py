@@ -193,23 +193,21 @@ def _bgm_filter(settings: Settings, duration: float, input_index: int = 2) -> st
     )
 
 
-def mix_audio(
+def mix_filter_graph(
     *,
-    video: Path,
-    narration_wav: Path,
-    bgm_wav: Path | None,
-    out_wav: Path,
     duration: float,
     has_ambient: bool,
+    has_bgm: bool,
     settings: Settings,
-) -> None:
-    inputs = ["-i", str(video), "-i", str(narration_wav)]
-    if bgm_wav:
-        inputs += ["-i", str(bgm_wav)]
+) -> list[str]:
+    """Return the ``filter_complex`` parts that produce ``[premix]``.
 
+    Pure string construction so the ducking graph can be asserted without
+    running FFmpeg. ``mix_audio`` appends the loudnorm/limiter pair on top.
+    """
     filters: list[str] = []
     use_ambient = bool(has_ambient and settings.ambient_volume > 0)
-    use_bgm = bgm_wav is not None
+    use_bgm = bool(has_bgm)
     # Narration to stereo + copies for the final mix and for each side-chain.
     sidechain_labels = (["[sc_amb]"] if use_ambient else []) + (["[sc_bgm]"] if use_bgm else [])
     if sidechain_labels:
@@ -236,8 +234,7 @@ def mix_audio(
         mix_inputs.append("[amb_duck]")
 
     if use_bgm:
-        b_idx = 2
-        filters.append(_bgm_filter(settings, duration, b_idx))
+        filters.append(_bgm_filter(settings, duration, 2))
         filters.append(
             "[bgm][sc_bgm]sidechaincompress="
             f"threshold=0.035:ratio={bgm_ratio:.1f}:attack=50:release=450:makeup=1[bgm_duck]"
@@ -251,6 +248,29 @@ def mix_audio(
             "".join(mix_inputs)
             + f"amix=inputs={len(mix_inputs)}:duration=longest:normalize=0[premix]"
         )
+    return filters
+
+
+def mix_audio(
+    *,
+    video: Path,
+    narration_wav: Path,
+    bgm_wav: Path | None,
+    out_wav: Path,
+    duration: float,
+    has_ambient: bool,
+    settings: Settings,
+) -> None:
+    inputs = ["-i", str(video), "-i", str(narration_wav)]
+    if bgm_wav:
+        inputs += ["-i", str(bgm_wav)]
+
+    filters = mix_filter_graph(
+        duration=duration,
+        has_ambient=has_ambient,
+        has_bgm=bgm_wav is not None,
+        settings=settings,
+    )
 
     measured = None
     if settings.two_pass_loudnorm:

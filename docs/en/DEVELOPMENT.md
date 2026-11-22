@@ -357,7 +357,9 @@ The VLM file reuses the `vlm_cache.json` schema. `cache_dir` changes the root; `
 - for each scene, sample `vlm_frames_per_scene` timestamps evenly within `[start+pad, end-pad]`;
 - extract frames with `ffmpeg -ss T -i video -frames:v 1 -vf scale=...`;
 - use `ThreadPoolExecutor` with concurrency 4;
-- output `frames/scene_XXXX_YY.jpg`.
+- output `frames/scene_XXXX_YY.jpg`;
+- then deduplicate: each frame is downscaled to a 16x16 grayscale thumbnail, and a frame is dropped (file deleted, path removed from `scenes.json`) when its mean absolute pixel difference from the last kept frame is below `vlm_frame_dedup` (default `4.0`, `0` disables). `select_representative_frames` is a pure helper, so the rule is unit-tested without FFmpeg;
+- the threshold is part of the VLM cache key (`engines.vlm.settings_key`), because it changes which frames the model sees.
 
 ### 5.3 VLM analysis
 
@@ -672,22 +674,23 @@ reachreel run /tmp/vf_test.mp4 \
 
 Current:
 
-- `tests/unit/test_units.py`: timestamps, subtitle splitting, JSON parsing, timeline placement, subtitle character preservation.
-- `tests/unit/test_qa.py`: SRT parsing, QA exit codes, settings snapshot, `[qa]` thresholds, astats parsing, subtitle margins, per-sentence alignment, `--only` parsing.
+- `tests/unit/test_units.py`: timestamps, subtitle splitting, JSON parsing, timeline placement, subtitle character preservation, the `mix_filter_graph` ducking graph, TTS retry/isolation, shared-cache keys.
+- `tests/unit/test_qa.py`: SRT parsing, QA exit codes, settings snapshot, `[qa]` thresholds, astats parsing, subtitle margins, per-sentence alignment, `--only` parsing, and manifest `render_settings` reuse (with CLI flags still winning).
 - `tests/unit/test_i18n_prompts.py`: catalog key parity, prompt packs, English prompt hygiene, and the CJK-free Python source guard.
 - `tests/integration/test_smoke.py`: opt-in end-to-end smoke (`REACHREEL_INTEGRATION=1`) that runs `tts → subtitle --asr none → mix --no-bgm → render --no-burn → qa` through the real CLI with macOS `say` on a generated clip; no models or network.
-- CI: `.github/workflows/ci.yml` runs Ruff, the unit suite, and `uv build` on `macos-15` (Apple silicon) for Python 3.11 and 3.12. The label is pinned on purpose: GitHub retires macOS images regularly, and a retired label fails every job at queue time with `<configuration> is not supported`, not with a test failure. Only currently supported arm64 labels are used; Intel macOS is not targeted.
+- `tests/integration/test_scenes.py`: opt-in FFmpeg-only fixtures — a three-colour clip with cuts at 2 s / 4 s for `detect_scenes` (boundaries, `min_len` merge, `max_len` split), no-audio / mono / 5.1 clips for `probe_video` channel reporting, and 90° / 180° / 270° clips for coded-vs-display dimensions.
+- `tests/integration/test_timeline.py`: opt-in fixture for the narration speed-up path — generated WAVs overrun the clip, so `place_segments` must call `atempo`, rewrite `audio_path`, and shorten the durations; the no-fit case is asserted to leave files untouched.
+- `tests/integration/test_smoke.py::OnlyReuseTest`: opt-in `run --only` reuse smoke that hashes `scenes.json` / `narration.wav` / `subtitles.srt` to prove earlier stages are not redone.
+- CI: `.github/workflows/ci.yml` runs Ruff, the unit suite, and `uv build` on `macos-15` (Apple silicon) for Python 3.11 and 3.12. The label is pinned on purpose: GitHub retires macOS images regularly, and a retired label fails every job at queue time with `<configuration> is not supported`, not with a test failure. Only currently supported arm64 labels are used; Intel macOS is not targeted. Integration tests are not part of CI; run them locally with `REACHREEL_INTEGRATION=1`.
 - No golden outputs yet.
 
 Suggested additions:
 
-1. scene detection fixtures (known cut points);
-2. timeline boundaries (too long/too short/no scenes);
-3. unit tests for the mix filter graph (string concatenation is enough);
-4. a full `run` smoke that asserts `--only` reuse (no model calls);
-5. manifest settings reuse in `render`;
-6. rotation metadata/portrait;
-7. no audio track / mono / 5.1 audio.
+1. a full `run` smoke that asserts `--only` reuse across every stage pair;
+2. QA threshold tuning against real footage (the fixtures are synthetic);
+3. a stage-command smoke on a rotated portrait clip end to end.
+
+Done: scene detection fixtures, the mix filter graph, manifest `render_settings` reuse, no-audio / mono / 5.1 probing, rotation probing, timeline boundaries plus the `atempo` fit, and `run --only` reuse.
 
 ---
 

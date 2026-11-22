@@ -9,6 +9,7 @@ llm_model = "qwen3:30b-instruct"
 vlm_workers = 2
 vlm_frames_per_scene = 3
 vlm_max_width = 768
+vlm_frame_dedup = 4.0
 llm_temperature = 0.6
 
 scene_threshold = 0.32

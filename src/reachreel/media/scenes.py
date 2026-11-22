@@ -4,7 +4,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from collections.abc import Iterable
+import subprocess
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from pathlib import Path
@@ -183,6 +184,91 @@ def _grab_frame(video: Path, time_s: float, out: Path, width: int) -> bool:
     return proc.returncode == 0 and out.exists() and out.stat().st_size > 0
 
 
+def select_representative_frames(
+    signatures: Sequence[bytes],
+    *,
+    threshold: float = 4.0,
+) -> list[int]:
+    """Return the indices of frames that are not near-duplicates.
+
+    Signatures are small grayscale thumbnails (see ``_frame_signature``). The
+    first frame is always kept; a later frame is kept only when its mean
+    absolute pixel difference from the last kept frame reaches ``threshold``.
+    A static long shot therefore collapses to one frame, while a pan keeps
+    several. ``threshold <= 0`` disables the filter and keeps everything.
+    """
+    if not signatures:
+        return []
+    if threshold <= 0:
+        return list(range(len(signatures)))
+    kept = [0]
+    for index in range(1, len(signatures)):
+        previous = signatures[kept[-1]]
+        current = signatures[index]
+        if len(previous) != len(current) or not previous:
+            kept.append(index)
+            continue
+        difference = sum(
+            abs(left - right) for left, right in zip(previous, current, strict=True)
+        ) / len(previous)
+        if difference >= threshold:
+            kept.append(index)
+    return kept
+
+
+def _frame_signature(path: Path, size: int = 16) -> bytes | None:
+    """Downscale a JPEG to a ``size``x``size`` grayscale thumbnail."""
+    proc = subprocess.run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-i",
+            str(path),
+            "-vf",
+            f"scale={size}:{size},format=gray",
+            "-frames:v",
+            "1",
+            "-f",
+            "rawvideo",
+            "-",
+        ],
+        check=False,
+        capture_output=True,
+        timeout=60,
+    )
+    if proc.returncode != 0 or len(proc.stdout) != size * size:
+        return None
+    return proc.stdout
+
+
+def _drop_duplicate_frames(scene: Scene, threshold: float) -> int:
+    """Delete near-duplicate frames from one scene; return how many were dropped."""
+    frames = [Path(p) for p in scene.frames]
+    if len(frames) < 2:
+        return 0
+    signatures = [_frame_signature(frame) for frame in frames]
+    if any(signature is None for signature in signatures):
+        # Without a signature we cannot judge, so keep the frames.
+        return 0
+    kept = select_representative_frames(
+        [signature for signature in signatures if signature is not None],
+        threshold=threshold,
+    )
+    if len(kept) == len(frames):
+        return 0
+    dropped = 0
+    for index, frame in enumerate(frames):
+        if index in kept:
+            continue
+        frame.unlink(missing_ok=True)
+        dropped += 1
+    scene.frames = [str(frames[index]) for index in kept]
+    return dropped
+
+
 def extract_frames(
     video: Path,
     scenes: list[Scene],
@@ -191,6 +277,7 @@ def extract_frames(
     per_scene: int = 3,
     width: int = 768,
     workers: int = 4,
+    dedup: float = 4.0,
 ) -> None:
     frames_dir.mkdir(parents=True, exist_ok=True)
     jobs: list[tuple[Scene, float, Path]] = []
@@ -226,6 +313,11 @@ def extract_frames(
 
     for scene in scenes:
         scene.frames.sort()
+
+    if dedup > 0:
+        dropped = sum(_drop_duplicate_frames(scene, dedup) for scene in scenes)
+        if dropped:
+            LOG.info("Dropped %d near-duplicate frames (dedup threshold %.1f)", dropped, dedup)
 
 
 def save_scenes(path: Path, info: VideoInfo, scenes: list[Scene]) -> None:

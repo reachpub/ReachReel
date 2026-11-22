@@ -255,6 +255,7 @@ reachreel run VIDEO [options]
 | `--whisper-model NAME` | `mlx-community/whisper-large-v3-turbo` | Subtitle model |
 | `--vlm-workers N` | `2` | VLM concurrency |
 | `--vlm-frames N` | `3` | Frames extracted per scene |
+| `--vlm-dedup X` | `4.0` | Drop frames whose difference from the previous kept frame is below `X` (`0` disables deduplication) |
 | `--scene-threshold X` | `0.32` | Scene cut threshold; lower is more sensitive |
 | `--style TEXT` | Built-in | Narration style prompt |
 | `--brief TEXT` | Empty | Shooting location / people / background information |
