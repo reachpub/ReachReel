@@ -1,0 +1,74 @@
+# ReachReel configuration example. Copy to config.toml and edit as needed.
+
+ui_language = "en"       # CLI/UI language: en | zh-CN
+content_language = "zh"  # narration/subtitles language: zh | en
+
+ollama_url = "http://localhost:11434"
+vlm_model = "qwen3-vl:8b-instruct"
+llm_model = "qwen3:30b-instruct"
+vlm_workers = 2
+vlm_frames_per_scene = 3
+vlm_max_width = 768
+llm_temperature = 0.6
+
+scene_threshold = 0.32
+min_scene_seconds = 1.2
+max_scene_seconds = 8.0
+max_scenes = 160
+
+# Narration style prompt. Empty = language-specific default from prompts/<lang>/style.txt.
+style = ""
+brief = ""
+speech_chars_per_second = 3.9  # Chinese characters/sec; English is roughly 14.5
+narration_density = 0.62
+min_gap_seconds = 0.28
+start_offset = 0.7
+tail_padding = 0.8
+max_speedup = 1.32
+
+tts_engine = "kokoro"
+kokoro_model = "mlx-community/Kokoro-82M-4bit"
+voice = "zf_xiaoxiao"
+tts_speed = 1.0
+say_voice = "Tingting"
+
+whisper_model = "mlx-community/whisper-large-v3-turbo"
+asr_language = "zh"
+subtitle_text = "script"   # script: script text + Whisper timing; asr: Whisper text
+subtitle_max_chars = 18      # English: roughly 42 characters per line
+subtitle_max_lines = 2
+subtitle_max_seconds = 6.0
+subtitle_font = "PingFang SC"
+subtitle_size = 48          # output pixels; hard subtitles use ASS with PlayRes = output resolution
+subtitle_margin_v = 36      # bottom margin in pixels; 180-260 is typical for portrait platforms
+subtitle_margin_left = 50
+subtitle_margin_right = 50
+
+bgm_dir = "inputs/bgm"
+bgm_file = ""
+bgm_volume = 0.20
+bgm_duck_db = -16.0
+ambient_volume = 0.16
+ambient_duck_db = -10.0
+target_lufs = -14.0
+true_peak = -1.5
+
+crf = 18
+preset = "medium"
+audio_bitrate = "192k"
+output_height = 0   # 0 = keep source resolution; 1080 is recommended for 4K sources
+output_fps = 0      # 0 = keep source fps; 30 is recommended for 4K60 sources
+burn_subtitles = true
+work_root = "output"
+
+# Optional QA thresholds. See docs/CONFIGURATION.md for the full list.
+[qa]
+freeze_noise = 0.0005
+freeze_min_seconds = 3.0
+freeze_fail_seconds = 8.0
+clip_peak_db = -0.1
+subtitle_safe_tolerance_px = 6.0
+subtitle_overflow_tolerance_px = 20.0
+narration_subtitle_tolerance_seconds = 0.9
+narration_subtitle_fail_ratio = 0.5
+skip_subtitle_pixels = false

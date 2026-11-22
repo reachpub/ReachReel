@@ -1,0 +1,27 @@
+# Canonical English content fallbacks and labels.
+
+[vlm]
+no_frames = "Scene {id} ({start:.1f}-{end:.1f}s): no usable keyframes"
+unknown = "unknown"
+context_label = "Known context: {context}\n"
+analysis_failed = "Scene analysis failed"
+scene_failed = "Scene {id}: analysis failed"
+
+[script.table]
+place = "Place: {value}"
+description = "Description: {value}"
+subjects = "Subjects: {value}"
+actions = "Actions: {value}"
+details = "Details: {value}"
+mood = "Mood: {value}"
+angle = "Narration angle: {value}"
+none = "none"
+
+[script]
+context_label = "Video context: {context}\n"
+fallback_intro = "A quiet landscape opens the film."
+fallback_start = "The film opens on a quiet landscape."
+condense_instruction = "The following English narration is too long. Compress it to about {target_chars} characters without losing visual information or inventing content. Keep the segment order and the JSON format:\n"
+condense_ending = "\nReturn only a JSON array: [{\"scene_ids\":[1,2],\"text\":\"...\"}]."
+expand_instruction = "The following English narration is too short and may not reach the ending. Expand it to about {target_chars} characters (video {duration:.1f}s) without inventing visual information. Add detail about actions, environment, and visual changes. Fill the middle and end in chronological order; the last segment should land 5-12 seconds before the video ends. Keep the JSON format:\n"
+expand_ending = "\nReturn only a JSON array: [{\"scene_ids\":[1,2],\"text\":\"...\"}]."

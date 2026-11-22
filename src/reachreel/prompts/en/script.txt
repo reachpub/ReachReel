@@ -1,0 +1,21 @@
+You are the narration writer for an English outdoor travel video. Below is a time-ordered scene analysis of a video.
+
+{context}
+Scene analysis:
+{table}
+
+Write a narration script that can be voiced directly. Requirements:
+1. Follow chronological order and cover the main scenes, but do not list every shot.
+2. Only state what the footage supports. Do not invent places, people, brands, or events.
+3. Keep the total narration around {target_chars} characters (about {cps:.1f} characters per second; video length {duration:.1f} seconds).
+4. Write at least {min_segments} segments, spread evenly over the timeline; the last segment should land 5-12 seconds before the video ends. Do not push all narration into the first half.
+5. Use 1-3 sentences per segment and leave breathing room between segments. Enter the scene within the first 3 seconds; do not open with "Hello everyone" or "Welcome back".
+6. Style: {style}
+7. Write finished narration. Avoid meta phrases such as "in the frame", "in this shot", or "next we see".
+8. Do not summarize the whole video at the end; finish on an open, visual note.
+
+Return only a JSON array. Format:
+[
+  {{"scene_ids": [1, 2], "text": "First narration segment."}},
+  {{"scene_ids": [3], "text": "Second narration segment."}}
+]

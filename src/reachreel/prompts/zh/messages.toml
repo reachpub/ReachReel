@@ -1,0 +1,27 @@
+# Chinese content fallbacks and labels.
+
+[vlm]
+no_frames = "第 {id} 个场景（{start:.1f}-{end:.1f}s），无可用关键帧"
+unknown = "未知"
+context_label = "已知背景：{context}\n"
+analysis_failed = "画面分析失败"
+scene_failed = "第 {id} 个场景（画面分析失败）"
+
+[script.table]
+place = "地点：{value}"
+description = "描述：{value}"
+subjects = "主体：{value}"
+actions = "动作：{value}"
+details = "细节：{value}"
+mood = "情绪：{value}"
+angle = "可写角度：{value}"
+none = "无"
+
+[script]
+context_label = "视频背景：{context}\n"
+fallback_intro = "风从山谷里穿过，画面慢慢向前展开。"
+fallback_start = "画面从安静的风景里开始。"
+condense_instruction = "下面是一版中文视频旁白，总字数偏多。请在不丢失画面信息、不编造内容的前提下压缩到约 {target_chars} 字，保留段落顺序和 JSON 格式：\n"
+condense_ending = "\n只输出 JSON 数组，格式为 [{\"scene_ids\":[1,2],\"text\":\"...\"}]。"
+expand_instruction = "下面是一版中文视频旁白，字数偏少，而且可能没有覆盖到片尾。请在不编造画面信息的前提下扩写到约 {target_chars} 字（视频 {duration:.1f} 秒），增加对画面细节、动作和环境变化的描述；按时间顺序补足中后段，最后一段要落在视频结束前 5-12 秒。保留 JSON 格式：\n"
+expand_ending = "\n只输出 JSON 数组，格式为 [{\"scene_ids\":[1,2],\"text\":\"...\"}]。"
