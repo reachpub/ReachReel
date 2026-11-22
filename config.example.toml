@@ -74,12 +74,38 @@ work_root = "output"
 cache_enabled = true
 cache_dir = ""
 
-# Optional QA thresholds. See docs/CONFIGURATION.md for the full list.
+# Optional QA thresholds. Every key here maps to qa_<key> in Settings; see
+# docs/en/CONFIGURATION.md for the meaning and the defaults.
 [qa]
+# Cut vs source duration
+duration_warn_seconds = 0.5
+duration_fail_seconds = 2.0
+# Narration/subtitle drift against the audio
+av_sync_warn_seconds = 0.2
+av_sync_fail_seconds = 0.8
+# Loudness and true peak
+lufs_warn_delta = 2.0
+lufs_fail_delta = 4.0
+true_peak_tolerance_db = 0.6
+true_peak_ceiling_db = 0.0
+# Black frames
+black_min_seconds = 0.5
+black_pixel_threshold = 0.1
+black_longest_fail_seconds = 3.0
+black_total_fail_seconds = 5.0
+# Frozen frames (compared against source motion)
 freeze_noise = 0.0005
 freeze_min_seconds = 3.0
 freeze_fail_seconds = 8.0
+freeze_motion_threshold = 0.02
+freeze_sample_seconds = 20.0
+# Clipping, from astats
 clip_peak_db = -0.1
+clip_sample_ratio = 0.0005
+clip_flat_factor = 0.5
+# Subtitle layout and alignment
+subtitle_char_warn_extra = 4
+subtitle_char_fail_extra = 10
 subtitle_safe_tolerance_px = 6.0
 subtitle_overflow_tolerance_px = 20.0
 narration_subtitle_tolerance_seconds = 0.9

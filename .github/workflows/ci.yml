@@ -44,6 +44,10 @@ jobs:
       - name: Python sources are English
         run: python3 scripts/check_python_language.py
 
+      - name: Configuration surface
+        # Settings <-> config.example.toml <-> both CONFIGURATION.md files.
+        run: python3 scripts/check_config_docs.py
+
   test:
     name: lint + unit tests (Python ${{ matrix.python-version }})
     # macOS 14 images are retired; macos-15 is the current arm64 (Apple silicon)

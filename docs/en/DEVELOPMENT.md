@@ -96,6 +96,7 @@ qa
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits validator shared by the git hook and CI | `validate`, `messages_in_range` |
 | `scripts/check_python_language.py` | Rejects CJK in Python sources (locales/prompts are not scanned) | `find_offenders` |
+| `scripts/check_config_docs.py` | Configuration surface: `Settings` ↔ `config.example.toml` ↔ both `CONFIGURATION.md` | `settings_fields`, `compare` |
 | `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` structural parity | `parse`, `compare`, `main` |
 
 ---
@@ -696,13 +697,26 @@ Escape hatches, so the rule never blocks ordinary work:
 
 A new section heading must be registered in `SECTIONS` inside the script; the check prints the exact heading and the expected translation. `tests/unit/test_changelog_sync.py` covers every rule plus the real repository pair.
 
+### Configuration surface
+
+`scripts/check_config_docs.py` reads the `Settings` dataclass with `ast` (no import, no venv) and checks the four homes AGENTS.md requires for every key:
+
+- a `Settings` field without a key in `config.example.toml` fails;
+- a `Settings` field without a `key` entry in either `CONFIGURATION.md` fails;
+- a key in `config.example.toml` that is not a `Settings` field fails, which catches typos;
+- a key whose value differs from the dataclass default only warns, because the sample file may deliberately show a tuned value; `--strict` makes it fail.
+
+`[qa]` keys are unprefixed in TOML and in the docs (`freeze_noise`), while the dataclass names them `qa_freeze_noise`; the script maps between the two. Fields computed at load time (`bgm_root_resolved`) are exempt through `DERIVED_FIELDS`.
+
+Running it for the first time found 18 `[qa]` thresholds that were in `Settings` and documented, but missing from `config.example.toml`; they are now listed there with their defaults.
+
 ### Which check runs where
 
 `ci.yml` has two jobs so the fast checks never compete with macOS minutes:
 
 | Job | Runner | Steps |
 |---|---|---|
-| `checks` | `ubuntu-latest` | commit messages, changelog parity, Python sources are English |
+| `checks` | `ubuntu-latest` | commit messages, changelog parity, Python sources are English, configuration surface |
 | `test` | `macos-15` × Python 3.11/3.12 | Ruff, unit tests, `uv build` (3.12 only) |
 
 The `checks` job needs no virtualenv and finishes in seconds, so a bad commit subject fails before a macOS runner is even allocated. `tests/integration` is never part of CI; run it with `REACHREEL_INTEGRATION=1`.

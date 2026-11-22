@@ -11,6 +11,7 @@
 - 新增提交信息校验：`scripts/check_commit_messages.py` 通过 `.githooks/commit-msg`（`git config core.hooksPath .githooks`）与 CI 两条路径执行，检查 push 或 PR 新增的每个提交。
 - 新增 `scripts/check_changelog.py`，在 CI 中校验 `CHANGELOG.md` 与 `CHANGELOG.zh-CN.md` 的结构一致性：版本标题、章节顺序、标题所用语言。某章节在一侧为空会失败；每章节条目数只作提示（一条长英文条目可以合法地拆成两条中文），`--strict` 才升级为错误。它当场发现了 0.1.0 里未翻译的 `### Added` / `### Known limitations`，现已改为中文。
 - 新增 `scripts/check_python_language.py`，取代原来写在测试里的 CJK 扫描，CI 不用装虚拟环境就能跑。
+- 新增 `scripts/check_config_docs.py`：每个 `Settings` 字段都必须出现在 `config.example.toml` 并在两份 `CONFIGURATION.md` 中有文档；未知键报错，默认值漂移只警告（`--strict` 才失败）。它第一次运行就发现 18 个 `[qa]` 阈值在 `config.example.toml` 里缺失，现已补齐。
 - `ci.yml` 拆成 `checks`（`ubuntu-latest`：提交信息、变更记录一致性、Python 源码无 CJK）与 macOS `test` 两个 job：提交信息写错会在几秒内失败，而不是等 macOS runner 分配；单元测试矩阵也不再重复跑这些检查。
 - 混音 filter graph 单元测试：`mix_filter_graph()` 抽成纯函数构造侧链图，覆盖仅旁白、仅环境音、仅 BGM、双路侧链、环境音音量为 0、压低比上下限。
 - `tests/integration/test_scenes.py`：只依赖 FFmpeg 的 fixture，三色片段带 2s / 4s 已知切点用于 `detect_scenes`，另有无音轨 / 单声道 / 5.1 片段断言 `probe_video` 的声道数，以及 90° / 180° / 270° 片段断言编码尺寸与显示尺寸。

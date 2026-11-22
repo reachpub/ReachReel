@@ -96,6 +96,7 @@ qa
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits 校验器，git hook 与 CI 共用 | `validate`, `messages_in_range` |
 | `scripts/check_python_language.py` | 拒绝 Python 源码里的 CJK（不扫描 locales/prompts） | `find_offenders` |
+| `scripts/check_config_docs.py` | 配置项三处一致：`Settings` ↔ `config.example.toml` ↔ 两份 `CONFIGURATION.md` | `settings_fields`, `compare` |
 | `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` 结构一致性 | `parse`, `compare`, `main` |
 
 ---
@@ -696,13 +697,26 @@ refactor(core)!: drop python 3.10
 
 新增章节标题需要在脚本的 `SECTIONS` 里登记，检查会打印违规标题与期望译名。`tests/unit/test_changelog_sync.py` 覆盖全部规则以及仓库里真实的这对文件。
 
+### 配置项一致性
+
+`scripts/check_config_docs.py` 用 `ast` 读取 `Settings`（不 import、不需要虚拟环境），检查 AGENTS 要求的四个位置：
+
+- `Settings` 有字段但 `config.example.toml` 没有对应键 → 失败；
+- `Settings` 有字段但任一 `CONFIGURATION.md` 没有 `key` 条目 → 失败；
+- `config.example.toml` 里出现了不是 `Settings` 字段的键 → 失败（抓拼写错误）；
+- 键值与 dataclass 默认值不同 → 只警告，因为示例文件可能故意示范调优后的值；`--strict` 时失败。
+
+`[qa]` 表里的键在 TOML 和文档中不带前缀（`freeze_noise`），而 dataclass 里叫 `qa_freeze_noise`，脚本会自动映射。加载时计算的字段（`bgm_root_resolved`）通过 `DERIVED_FIELDS` 豁免。
+
+第一次运行它就发现 18 个 `[qa]` 阈值：`Settings` 里有、文档里有，但 `config.example.toml` 漏了；现已按默认值补齐。
+
 ### 哪项检查在哪里跑
 
 `ci.yml` 拆成两个 job，让快速检查不占 macOS 分钟：
 
 | Job | Runner | 步骤 |
 |---|---|---|
-| `checks` | `ubuntu-latest` | 提交信息、变更记录一致性、Python 源码无 CJK |
+| `checks` | `ubuntu-latest` | 提交信息、变更记录一致性、Python 源码无 CJK、配置项一致性 |
 | `test` | `macos-15` × Python 3.11/3.12 | Ruff、单元测试、`uv build`（仅 3.12） |
 
 `checks` 不需要虚拟环境，几秒结束；提交信息写错会在 macOS runner 分配之前就失败。`tests/integration` 不进 CI，本地用 `REACHREEL_INTEGRATION=1` 跑。

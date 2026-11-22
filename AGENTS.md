@@ -103,7 +103,7 @@ The installed command is `reachreel`.
 - Write JSON and manifests with `core.util.atomic_write_json` (temporary file + fsync + replace).
 - Validate user-provided input paths. Do not allow path traversal or symlink escape out of an allowed directory.
 - Never write API keys, tokens, or credentials into `manifest.json`, logs, or generated packages.
-- A new configuration key must be added in all of these places:
+- A new configuration key must be added in all of these places (`scripts/check_config_docs.py` verifies 1-3 in CI; 4 is checked in review):
   1. `core/config.py`
   2. `config.example.toml`
   3. `docs/en/CONFIGURATION.md` and `docs/zh-CN/CONFIGURATION.md`
