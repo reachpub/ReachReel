@@ -4,9 +4,19 @@
 
 ## [Unreleased]
 
+### 新增
+
+- CI 工作流（`.github/workflows/ci.yml`）：在 macOS 上对 Python 3.10 和 3.12 运行 Ruff、单元测试和 `uv build`。
+- 可选的集成 smoke 测试（`tests/integration/test_smoke.py`）：通过真实 CLI 用 macOS `say` 覆盖 `tts -> subtitle -> mix -> render -> qa`。
+- 为 Python 3.10 增加 `tomli` 回退，用于读取 TOML 语言目录和配置。
+
 ### 变更
 
 - 项目许可证由 MIT 改为 Apache-2.0；补充完整许可证文本和 `NOTICE` 文件。
+
+### 修复
+
+- `docs/en/DEVELOPMENT.md` 和 `docs/zh-CN/DEVELOPMENT.md` 的测试路径已改为与 `tests/unit/` 目录一致。
 
 ## [0.1.0] - 2026-11-22
 

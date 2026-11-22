@@ -9,7 +9,10 @@ from __future__ import annotations
 from functools import lru_cache
 from importlib import resources
 
-import tomllib
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
+    import tomli as tomllib
 
 DEFAULT_LANGUAGE = "zh"
 SUPPORTED_LANGUAGES = ("zh", "en")

@@ -612,21 +612,22 @@ reachreel run /tmp/vf_test.mp4 \
 
 Current:
 
-- `tests/test_units.py`: timestamps, subtitle splitting, JSON parsing, timeline placement, subtitle character preservation.
-- `tests/test_qa.py`: SRT parsing, QA exit codes, settings snapshot, `[qa]` thresholds, astats parsing, subtitle margins, per-sentence alignment, `--only` parsing.
-- Manual integration smoke: `script → tts → subtitle → mix → render → qa` has passed; `run --only qa`, `run --dry-run`, subtitle pixel overflow, and static long-shot freeze detection have been verified on synthetic footage.
-- No integration tests, no CI, no golden output.
+- `tests/unit/test_units.py`: timestamps, subtitle splitting, JSON parsing, timeline placement, subtitle character preservation.
+- `tests/unit/test_qa.py`: SRT parsing, QA exit codes, settings snapshot, `[qa]` thresholds, astats parsing, subtitle margins, per-sentence alignment, `--only` parsing.
+- `tests/unit/test_i18n_prompts.py`: catalog key parity, prompt packs, English prompt hygiene, and the CJK-free Python source guard.
+- `tests/integration/test_smoke.py`: opt-in end-to-end smoke (`REACHREEL_INTEGRATION=1`) that runs `tts → subtitle --asr none → mix --no-bgm → render --no-burn → qa` through the real CLI with macOS `say` on a generated clip; no models or network.
+- CI: `.github/workflows/ci.yml` runs Ruff, the unit suite, and `uv build` on macOS for Python 3.10 and 3.12.
+- No golden outputs yet.
 
 Suggested additions:
 
 1. scene detection fixtures (known cut points);
-2. a property test that subtitles never drop characters;
-3. timeline boundaries (too long/too short/no scenes);
-4. unit tests for the mix filter graph (string concatenation is enough);
-5. an end-to-end smoke test (with `say` + `--asr none`, not depending on large models);
-6. manifest settings reuse in `render`;
-7. rotation metadata/portrait;
-8. no audio track / mono / 5.1 audio.
+2. timeline boundaries (too long/too short/no scenes);
+3. unit tests for the mix filter graph (string concatenation is enough);
+4. a full `run` smoke that asserts `--only` reuse (no model calls);
+5. manifest settings reuse in `render`;
+6. rotation metadata/portrait;
+7. no audio track / mono / 5.1 audio.
 
 ---
 

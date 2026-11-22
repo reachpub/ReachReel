@@ -4,9 +4,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- CI workflow (`.github/workflows/ci.yml`) running Ruff, the unit suite, and `uv build` on macOS for Python 3.10 and 3.12.
+- Opt-in integration smoke test (`tests/integration/test_smoke.py`) covering `tts -> subtitle -> mix -> render -> qa` through the real CLI with macOS `say`.
+- `tomli` fallback so Python 3.10 can load TOML catalogs and configuration.
+
 ### Changed
 
 - Project license changed from MIT to Apache-2.0; added the full license text and a `NOTICE` file.
+
+### Fixed
+
+- Test paths in `docs/en/DEVELOPMENT.md` and `docs/zh-CN/DEVELOPMENT.md` now match the `tests/unit/` layout.
 
 ## [0.1.0] - 2026-11-22
 

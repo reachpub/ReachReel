@@ -612,21 +612,22 @@ reachreel run /tmp/vf_test.mp4 \
 
 当前：
 
-- `tests/test_units.py`：时间戳、字幕切分、JSON 解析、时间轴落点、字幕不丢字。
-- `tests/test_qa.py`：SRT 解析、QA 退出码、settings 快照、`[qa]` 阈值、astats 解析、字幕边距、逐句对齐、`--only` 解析。
-- 手动集成 smoke：`script → tts → subtitle → mix → render → qa` 已跑通；`run --only qa`、`run --dry-run`、字幕像素超框、静态长镜头冻结判定已在合成素材上验证。
-- 没有集成测试、没有 CI、没有 golden output。
+- `tests/unit/test_units.py`：时间戳、字幕切分、JSON 解析、时间轴落点、字幕不丢字。
+- `tests/unit/test_qa.py`：SRT 解析、QA 退出码、settings 快照、`[qa]` 阈值、astats 解析、字幕边距、逐句对齐、`--only` 解析。
+- `tests/unit/test_i18n_prompts.py`：语言目录键一致、prompt 包、英文 prompt 卫生、Python 源码无 CJK 检查。
+- `tests/integration/test_smoke.py`：可选的端到端 smoke（`REACHREEL_INTEGRATION=1`），用 macOS `say` 在合成素材上通过真实 CLI 跑 `tts → subtitle --asr none → mix --no-bgm → render --no-burn → qa`；不需要模型或网络。
+- CI：`.github/workflows/ci.yml` 在 macOS 上对 Python 3.10 和 3.12 跑 Ruff、单元测试和 `uv build`。
+- 目前没有 golden output。
 
 建议补充：
 
 1. 场景检测的 fixture（已知切点）；
-2. 字幕不丢字的 property test；
-3. 时间轴边界（超长/超短/无场景）；
-4. 混音 filter graph 的单元测试（拼字符串即可）；
-5. 端到端 smoke test（用 `say` + `--asr none`，不依赖大模型）；
-6. `render` 的 manifest 设置复用；
-7. 旋转元数据/竖屏；
-8. 无音轨 / 单声道 / 5.1 音轨。
+2. 时间轴边界（超长/超短/无场景）；
+3. 混音 filter graph 的单元测试（拼字符串即可）；
+4. 断言 `--only` 复用的完整 `run` smoke（不调用模型）；
+5. `render` 的 manifest 设置复用；
+6. 旋转元数据/竖屏；
+7. 无音轨 / 单声道 / 5.1 音轨。
 
 ---
 
