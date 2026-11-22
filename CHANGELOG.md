@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
 ### Added
 
 - `render` warns when `output_height` is 0 and the source is larger than 1080p on its short side, because such a run silently keeps 4K, produces a much larger file, and makes the subtitle size look small. Found by running the Niagara 4K clip end to end.
@@ -20,7 +22,6 @@
 - `tests/integration/test_timeline.py`: covers the narration `atempo` fit path on real WAVs, and that a timeline that already fits is left untouched.
 - `tests/integration/test_smoke.py::OnlyReuseTest`: `run --only tts`, `--only mix,render`, and `--only qa` are asserted not to redo earlier stages, using artifact hashes.
 - Unit tests for timeline boundaries: empty list, no scenes, unknown scene id, overlong narration warning, and clips shorter than `tail_padding`.
-
 - Retroactive `v0.1.0` (`b8a60ae`) and `v0.2.0` (`c9c3652`) tags, each with a GitHub release whose wheel and sdist were built from the tagged commit. Both are labelled retroactive because neither version had ever been tagged or announced.
 
 ### Changed
