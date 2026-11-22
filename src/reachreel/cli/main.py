@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+from .. import __version__
 from ..core.config import Settings
 from ..core.util import read_json, setup_logging
 from ..i18n import negotiate_language, set_language, supported_languages, t
@@ -42,13 +43,17 @@ def _overrides(args: argparse.Namespace) -> dict:
         "output_fps": getattr(args, "fps", None),
         "subtitle_size": getattr(args, "subtitle_size", None),
         "subtitle_max_chars": getattr(args, "subtitle_chars", None),
+        "subtitle_preset": getattr(args, "subtitle_preset", None),
         "subtitle_margin_v": getattr(args, "subtitle_margin_v", None),
         "subtitle_margin_left": getattr(args, "subtitle_margin_left", None),
         "subtitle_margin_right": getattr(args, "subtitle_margin_right", None),
         "bgm_file": getattr(args, "bgm", None),
         "bgm_dir": getattr(args, "bgm_dir", None),
+        "bgm_fade_seconds": getattr(args, "bgm_fade", None),
         "work_root": getattr(args, "out", None),
         "burn_subtitles": not getattr(args, "no_burn", False),
+        "cache_dir": getattr(args, "cache_dir", None),
+        "cache_enabled": False if getattr(args, "no_cache", None) else None,
     }
 
 
@@ -93,6 +98,7 @@ def _workdir_context(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="reachreel", description=t("cli.description"))
+    parser.add_argument("--version", action="version", version=f"reachreel {__version__}")
     parser.add_argument("--verbose", action="store_true", help=t("cli.verbose"))
     parser.add_argument(
         "--lang",
@@ -106,6 +112,8 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=t("cli.content_language"),
     )
+    parser.add_argument("--cache-dir", default=None, help=t("cli.cache_dir"))
+    parser.add_argument("--no-cache", action="store_true", default=None, help=t("cli.no_cache"))
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -155,6 +163,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help=t("cli.subtitle_chars"),
         )
+        p.add_argument(
+            "--subtitle-preset",
+            choices=["douyin", "reels", "shorts", "landscape"],
+            default=None,
+            help=t("cli.subtitle_preset"),
+        )
         p.add_argument("--subtitle-margin-v", type=int, default=None, help=t("cli.subtitle_margin_v"))
         p.add_argument(
             "--subtitle-margin-left",
@@ -176,6 +190,7 @@ def build_parser() -> argparse.ArgumentParser:
     def bgm_options(p: argparse.ArgumentParser) -> None:
         p.add_argument("--bgm", default=None, help=t("cli.bgm"))
         p.add_argument("--bgm-dir", default=None, help=t("cli.bgm_dir"))
+        p.add_argument("--bgm-fade", type=float, default=None, help=t("cli.bgm_fade"))
         p.add_argument("--no-bgm", action="store_true")
 
     run = sub.add_parser("run", help=t("cli.run"))
@@ -209,6 +224,11 @@ def build_parser() -> argparse.ArgumentParser:
         help=t("cli.only"),
     )
     run.add_argument("--dry-run", action="store_true", help=t("cli.dry_run"))
+    run.add_argument(
+        "--review-script",
+        action="store_true",
+        help=t("cli.review_script"),
+    )
 
     analyze = sub.add_parser("analyze", help=t("cli.analyze"))
     common(analyze)
@@ -250,6 +270,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=t("cli.render_subtitle_size"),
     )
     render.add_argument(
+        "--subtitle-preset",
+        choices=["douyin", "reels", "shorts", "landscape"],
+        default=None,
+        help=t("cli.subtitle_preset"),
+    )
+    render.add_argument(
         "--subtitle-margin-v",
         type=int,
         default=None,
@@ -276,10 +302,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     doc = sub.add_parser("doctor", help=t("cli.doctor"))
     doc.add_argument("--config", default=None)
+    doc.add_argument("--json", action="store_true", help=t("cli.json"))
 
     licenses = sub.add_parser("licenses", help=t("cli.licenses"))
     licenses.add_argument("workdir", type=Path)
     licenses.add_argument("--out", type=Path, default=None, help=t("cli.licenses_out"))
+
+    cache = sub.add_parser("cache", help=t("cli.cache"))
+    cache_sub = cache.add_subparsers(dest="cache_command", required=True)
+    cache_info = cache_sub.add_parser("info", help=t("cli.cache_info"))
+    cache_info.add_argument("--config", default=None)
+    cache_clean = cache_sub.add_parser("clean", help=t("cli.cache_clean"))
+    cache_clean.add_argument("--config", default=None)
+    cache_clean.add_argument("--yes", action="store_true", help=t("cli.cache_clean_yes"))
+    cache_clean.add_argument("--dry-run", action="store_true", help=t("cli.cache_clean_dry"))
 
     return parser
 
@@ -307,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "doctor":
         settings = Settings.load(Path(args.config) if args.config else None)
-        return doctor(settings)
+        return doctor(settings, as_json=args.json)
 
     if args.command == "run":
         if not args.video.exists():
@@ -318,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
             only = parse_only(args.only)
         except ValueError as exc:
             parser.error(str(exc))
+        if args.review_script and only is not None and "script" not in only:
+            parser.error(t("error.review_script_needs_script"))
         video = args.video
         manifest: dict = {}
         # Reuse the settings snapshot when running into an existing workdir,
@@ -357,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
             qa_strict=args.qa_strict,
             only=only,
             dry_run=args.dry_run,
+            review_script=args.review_script,
         )
         if args.dry_run:
             return 0
@@ -433,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
                 "crf": settings.crf,
                 "subtitle_font": settings.subtitle_font,
                 "subtitle_size": settings.subtitle_size,
+                "subtitle_preset": settings.subtitle_preset,
                 "subtitle_margin_v": settings.subtitle_margin_v,
                 "subtitle_margin_left": settings.subtitle_margin_left,
                 "subtitle_margin_right": settings.subtitle_margin_right,
@@ -442,6 +482,47 @@ def main(argv: list[str] | None = None) -> int:
         )
         atomic_write_json(workdir / "manifest.json", manifest)
         print(f"{out} (burned={burned})")
+        return 0
+
+    if args.command == "cache":
+        from ..core.cache import cache_root, cache_stats, clean_cache, format_bytes
+
+        settings = Settings.load(Path(args.config) if args.config else None)
+        if getattr(args, "cache_dir", None):
+            settings.cache_dir = args.cache_dir
+        root = cache_root(settings.cache_dir)
+        stats = cache_stats(root)
+        if args.cache_command == "info":
+            print(
+                t(
+                    "cache.info",
+                    dir=root,
+                    files=stats["files"],
+                    size=format_bytes(stats["bytes"]),
+                )
+            )
+            return 0
+        if not args.yes and not args.dry_run:
+            parser.error(t("cache.confirm", dir=root))
+        if args.dry_run:
+            print(
+                t(
+                    "cache.dry_run",
+                    dir=root,
+                    files=stats["files"],
+                    size=format_bytes(stats["bytes"]),
+                )
+            )
+            return 0
+        clean_cache(root)
+        print(
+            t(
+                "cache.cleaned",
+                dir=root,
+                files=stats["files"],
+                size=format_bytes(stats["bytes"]),
+            )
+        )
         return 0
 
     if args.command == "licenses":

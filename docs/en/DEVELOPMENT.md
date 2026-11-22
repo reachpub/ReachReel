@@ -49,7 +49,8 @@ prepare_scenes
 understand
   └─ analyze_scenes
 write_script
-  └─ generate_script
+  ├─ generate_script
+  └─ write_script_md (review gate)
 make_voice
   └─ synthesize_segments
 make_timeline
@@ -78,6 +79,7 @@ qa
 | `src/reachreel/cli/main.py` | Argument parsing, subcommands | `main`, `build_parser` |
 | `src/reachreel/core/config.py` | Config dataclasses, TOML, environment variables, precedence | `Settings`, `Settings.load` |
 | `src/reachreel/core/util.py` | Subprocesses, ffprobe, JSON, timestamps | `run`, `ffprobe_json`, `ffmpeg_full`, `srt_timestamp` |
+| `src/reachreel/core/cache.py` | Shared cache paths, video fingerprint, cleanup | `cache_root`, `video_key`, `cache_stats`, `clean_cache` |
 | `src/reachreel/i18n/__init__.py` | CLI/UI language negotiation and message catalog | `t`, `set_language`, `negotiate_language` |
 | `src/reachreel/prompts/__init__.py` | Prompt-pack and content-catalog loader | `load_prompt`, `load_content`, `text` |
 | `src/reachreel/prompts/{zh,en}/` | Language-specific prompts and fallback data | `vlm.txt`, `script.txt`, `style.txt`, `messages.toml` |
@@ -90,7 +92,7 @@ qa
 | `src/reachreel/media/subtitles.py` | Whisper transcription, speech windows, SRT, ASS layout | `cues_from_timeline`, `build_subtitles`, `write_ass` |
 | `src/reachreel/media/audio.py` | BGM selection/looping, catalog metadata, license export, sidechain ducking, loudness | `pick_bgm`, `mix_audio`, `bgm_metadata`, `bgm_license_markdown` |
 | `src/reachreel/media/render.py` | Scaling/frame rate, burned-in/soft subtitles, muxing | `render`, `subtitle_style` |
-| `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor` |
+| `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
 
 ---
@@ -253,6 +255,11 @@ Key fields:
     "source": "https://...",
     "license": "CC0-1.0"
   },
+  "cache": {
+    "enabled": true,
+    "dir": "/Users/you/.cache/reachreel",
+    "video_key": "5c1f..."
+  },
   "quality_flags": [
     {
       "code": "asr.fallback",
@@ -303,9 +310,22 @@ Key fields:
 | `mix.wav` | Final mix |
 | `subtitles.srt` | Subtitles (soft-subtitle/compatible) |
 | `subtitles.ass` | Burned-in subtitle layout, `PlayResX/Y` = output resolution |
+| `script.md` | Human-readable script preview for the review gate |
 | `qa.json` | QA gate results |
 | `licenses.md` | BGM license list exported by `reachreel licenses` |
 | `final.mp4` | Final cut |
+
+### 4.7 Shared cache (optional)
+
+The cross-workdir cache is separate from the work directory:
+
+```text
+~/Library/Caches/reachreel/   # platform cache dir; legacy ~/.cache/reachreel is reused
+├── vlm/<video_key>.json   # VLM results keyed by a sampled video fingerprint
+└── tts/<hash>.wav         # segment audio keyed by engine/model/voice/speed/text
+```
+
+The VLM file reuses the `vlm_cache.json` schema. `cache_dir` changes the root; `cache_enabled = false`, `REACHREEL_CACHE=0`, or `--no-cache` disables it. `reachreel cache info` and `cache clean --yes` inspect and remove it.
 
 ---
 
@@ -417,14 +437,16 @@ Apply `atempo=factor` to every segment and place them again.
 
 1. Transcribe `narration.wav` with `mlx-whisper` to get `segments` / `words`;
 2. For each narration segment, find overlapping Whisper segments to get a more precise speech start/end window;
-3. Split lines using the **original script text** by `subtitle_max_chars`, and group them by `subtitle_max_lines`;
-4. Distribute time within the speech window in proportion to character count;
+3. Split lines using the **original script text** by `subtitle_max_chars` and `subtitle_max_lines`: CJK prefers punctuation boundaries, whitespace languages pack whole words;
+4. Distribute time within the speech window by character count plus a pause bonus after sentence/clause punctuation;
 5. Generate SRT.
 
 Key points:
 
 - ASR text is not used, avoiding homophone typos;
 - no characters are dropped: `_cue_texts` guarantees every character lands in some cue;
+- the line length and line count limits are hard constraints;
+- `subtitle_preset` (`douyin` / `reels` / `shorts` / `landscape`) overrides the manual safe margins and applies to both ASS output and QA;
 - timestamps are segment/line-level precision, not per-character karaoke.
 
 ### 5.8 Mixing
@@ -437,14 +459,18 @@ Filter graph of `audio.mix_audio`:
 [original] volume=ambient_volume -> [amb]
 [amb][sc_amb] sidechaincompress -> [amb_duck]
 
-[bgm] volume=bgm_volume -> [bgm]
+[bgm] volume=bgm_volume, afade=t=out -> [bgm]
 [bgm][sc_bgm] sidechaincompress -> [bgm_duck]
 
-[amb_duck][bgm_duck][nar] amix -> loudnorm(-14 LUFS) -> alimiter -> [aout]
+[amb_duck][bgm_duck][nar] amix -> [premix]
+[premix] loudnorm(measure) -> JSON            # first pass
+[premix] loudnorm(measured, linear=true) -> alimiter -> [aout]  # second pass
 ```
 
 - the `sidechaincompress` ratio is approximated from `abs(duck_db)/2`;
 - when ambient audio or BGM is missing, `asplit` outputs are reduced automatically to avoid empty labels;
+- BGM fades out over `bgm_fade_seconds` before ducking;
+- `two_pass_loudnorm` measures the mix first, then applies a linear normalization; if measurement fails it falls back to single-pass;
 - loudness is finally normalized to `target_lufs` with true peak `true_peak`.
 
 ### 5.9 Rendering

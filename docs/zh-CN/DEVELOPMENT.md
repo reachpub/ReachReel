@@ -49,7 +49,8 @@ prepare_scenes
 understand
   └─ analyze_scenes
 write_script
-  └─ generate_script
+  ├─ generate_script
+  └─ write_script_md（人工确认闸门）
 make_voice
   └─ synthesize_segments
 make_timeline
@@ -78,6 +79,7 @@ qa
 | `src/reachreel/cli/main.py` | 参数解析、子命令 | `main`, `build_parser` |
 | `src/reachreel/core/config.py` | 配置 dataclass、TOML、环境变量、优先级 | `Settings`, `Settings.load` |
 | `src/reachreel/core/util.py` | 子进程、ffprobe、JSON、时间戳 | `run`, `ffprobe_json`, `ffmpeg_full`, `srt_timestamp` |
+| `src/reachreel/core/cache.py` | 共享缓存路径、视频指纹、清理 | `cache_root`, `video_key`, `cache_stats`, `clean_cache` |
 | `src/reachreel/i18n/__init__.py` | CLI/UI 语言协商与文案目录 | `t`, `set_language`, `negotiate_language` |
 | `src/reachreel/prompts/__init__.py` | Prompt 包与内容文案目录加载 | `load_prompt`, `load_content`, `text` |
 | `src/reachreel/prompts/{zh,en}/` | 语言相关 prompt 与 fallback 数据 | `vlm.txt`, `script.txt`, `style.txt`, `messages.toml` |
@@ -90,7 +92,7 @@ qa
 | `src/reachreel/media/subtitles.py` | Whisper 转写、语音窗口、SRT、ASS 布局 | `cues_from_timeline`, `build_subtitles`, `write_ass` |
 | `src/reachreel/media/audio.py` | BGM 选择/循环、曲目元数据、授权导出、侧链闪避、响度 | `pick_bgm`, `mix_audio`, `bgm_metadata`, `bgm_license_markdown` |
 | `src/reachreel/media/render.py` | 缩放/帧率、硬字幕/软字幕、封装 | `render`, `subtitle_style` |
-| `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor` |
+| `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
 
 ---
@@ -253,6 +255,11 @@ qa
     "source": "https://...",
     "license": "CC0-1.0"
   },
+  "cache": {
+    "enabled": true,
+    "dir": "/Users/you/.cache/reachreel",
+    "video_key": "5c1f..."
+  },
   "quality_flags": [
     {
       "code": "asr.fallback",
@@ -303,9 +310,22 @@ qa
 | `mix.wav` | 最终混音 |
 | `subtitles.srt` | 字幕（软字幕/兼容） |
 | `subtitles.ass` | 硬字幕布局，`PlayResX/Y` = 输出分辨率 |
+| `script.md` | 供人工确认的脚本预览 |
 | `qa.json` | QA 闸门结果 |
 | `licenses.md` | `reachreel licenses` 导出的 BGM 授权清单 |
 | `final.mp4` | 成片 |
+
+### 4.7 共享缓存（可选）
+
+跨工作目录缓存与工作目录分开：
+
+```text
+~/Library/Caches/reachreel/   # 平台缓存目录；旧 ~/.cache/reachreel 会被复用
+├── vlm/<video_key>.json   # 按视频采样指纹复用 VLM 结果
+└── tts/<hash>.wav         # 按 engine/model/voice/speed/text 复用分段音频
+```
+
+VLM 文件沿用 `vlm_cache.json` 的结构。`cache_dir` 可改根目录；`cache_enabled = false`、`REACHREEL_CACHE=0` 或 `--no-cache` 可关闭。`reachreel cache info` / `cache clean --yes` 用于查看和清理。
 
 ---
 
@@ -417,14 +437,16 @@ factor = clamp(factor, 1.0, max_speedup)
 
 1. 用 `mlx-whisper` 转写 `narration.wav`，拿 `segments` / `words`；
 2. 对每个旁白段，找重叠的 Whisper 段，得到更精确的语音起止窗口；
-3. 用**原稿文字**按 `subtitle_max_chars` 切行，按 `subtitle_max_lines` 分组；
-4. 在语音窗口内按字数比例分配时间；
+3. 用**原稿文字**按 `subtitle_max_chars` 和 `subtitle_max_lines` 切行：中文优先标点边界，空格语言按整词打包；
+4. 在语音窗口内按“字数 + 句末/逗号停顿加成”分配时间；
 5. 生成 SRT。
 
 关键点：
 
 - 不使用 ASR 文字，避免同音错字；
 - 不会丢字：`_cue_texts` 保证所有字符进入某条字幕；
+- 每行字数和行数是硬约束；
+- `subtitle_preset`（`douyin` / `reels` / `shorts` / `landscape`）覆盖手动安全边距，ASS 输出和 QA 使用同一套边距；
 - 时间戳是“段级/行级”精度，不是逐字卡拉 OK。
 
 ### 5.8 混音
@@ -437,14 +459,18 @@ factor = clamp(factor, 1.0, max_speedup)
 [original] volume=ambient_volume -> [amb]
 [amb][sc_amb] sidechaincompress -> [amb_duck]
 
-[bgm] volume=bgm_volume -> [bgm]
+[bgm] volume=bgm_volume, afade=t=out -> [bgm]
 [bgm][sc_bgm] sidechaincompress -> [bgm_duck]
 
-[amb_duck][bgm_duck][nar] amix -> loudnorm(-14 LUFS) -> alimiter -> [aout]
+[amb_duck][bgm_duck][nar] amix -> [premix]
+[premix] loudnorm(测量) -> JSON               # 第一遍
+[premix] loudnorm(measured, linear=true) -> alimiter -> [aout]  # 第二遍
 ```
 
 - `sidechaincompress` 的 ratio 由 `abs(duck_db)/2` 近似换算；
 - 原声或 BGM 缺失时自动减少 `asplit` 输出，避免空标签；
+- BGM 在闪避前按 `bgm_fade_seconds` 淡出；
+- `two_pass_loudnorm` 先测量再线性归一；测量失败时回退单遍；
 - 最后统一响度到 `target_lufs`、真峰值 `true_peak`。
 
 ### 5.9 渲染

@@ -85,9 +85,12 @@ class StageSmokeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.tmp = Path(tempfile.mkdtemp(prefix="reachreel-smoke-"))
-        cls.video = cls.tmp / "clip.mp4"
-        cls.workdir = cls.tmp / "work"
-        cls.config = cls.tmp / "config.toml"
+        # Exercise non-ASCII and whitespace paths end to end.
+        fixture_dir = cls.tmp / "测试 素材"
+        fixture_dir.mkdir(parents=True, exist_ok=True)
+        cls.video = fixture_dir / "测试 素材 6s.mp4"
+        cls.workdir = cls.tmp / "工作 目录"
+        cls.config = cls.tmp / "配置 文件.toml"
         voice = _pick_say_voice()
         if voice is None:
             raise unittest.SkipTest("no macOS `say` voice is installed")
@@ -115,6 +118,25 @@ class StageSmokeTest(unittest.TestCase):
             ],
             timeout=120,
         )
+        cls.bgm = fixture_dir / "背景 音乐.wav"
+        run(
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                f"sine=frequency=220:sample_rate=48000:duration={CLIP_SECONDS + 4}",
+                "-c:a",
+                "pcm_s16le",
+                str(cls.bgm),
+            ],
+            timeout=120,
+        )
 
         cls.config.write_text(
             "\n".join(
@@ -132,6 +154,7 @@ class StageSmokeTest(unittest.TestCase):
                     "subtitle_margin_right = 10",
                     "crf = 30",
                     'preset = "ultrafast"',
+                    "cache_enabled = false",
                     "",
                 ]
             ),
@@ -189,14 +212,38 @@ class StageSmokeTest(unittest.TestCase):
         )
         return proc
 
+    def test_reused_scenes_refresh_video_metadata(self) -> None:
+        path = self.workdir / "scenes.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["video"].update(
+            {
+                "rotation": 0.0,
+                "width": 999,
+                "height": 111,
+                "coded_width": 0,
+                "coded_height": 0,
+            }
+        )
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+        pipeline = Pipeline(self.video, Settings.load(self.config), workdir=self.workdir)
+        pipeline.prepare_scenes()
+        info = pipeline.load_video()
+        self.assertEqual((info.width, info.height), (480, 270))
+        self.assertEqual((info.coded_width, info.coded_height), (480, 270))
+        refreshed = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(refreshed["video"]["coded_width"], 480)
+
     def test_stage_chain_renders_and_passes_qa(self) -> None:
         workdir = str(self.workdir)
         config = str(self.config)
 
         self._cli("tts", workdir, "--config", config, "--tts", "say", "--voice", self.voice)
         self._cli("subtitle", workdir, "--config", config, "--asr", "none")
-        self._cli("mix", workdir, "--config", config, "--no-bgm")
-        self._cli("render", workdir, "--config", config, "--no-burn")
+        self._cli("mix", workdir, "--config", config, "--bgm", str(self.bgm))
+        # Let render burn subtitles when ffmpeg-full/libass is available; the
+        # non-ASCII workdir path exercises the filter-path escaping.
+        self._cli("render", workdir, "--config", config)
         self._cli("qa", workdir, "--config", config)
         self._cli("licenses", workdir)
 
@@ -219,7 +266,8 @@ class StageSmokeTest(unittest.TestCase):
         self.assertEqual(manifest["narration_segments"], len(SEGMENT_TEXTS))
 
         licenses = (self.workdir / "licenses.md").read_text(encoding="utf-8")
-        self.assertIn("BGM", licenses)
+        self.assertIn("Media licenses", licenses)
+        self.assertIn(self.bgm.name, licenses)
 
 
 if __name__ == "__main__":

@@ -32,6 +32,9 @@ jobs:
         # keeps CI fast and avoids multi-gigabyte model wheels.
         run: uv pip install --python .venv/bin/python --no-deps -e .
 
+      - name: Install lightweight dependencies used by unit tests
+        run: uv pip install --python .venv/bin/python 'platformdirs>=4.0'
+
       - name: Install TOML shim for Python 3.10
         if: matrix.python-version == '3.10'
         run: uv pip install --python .venv/bin/python 'tomli>=2.0'

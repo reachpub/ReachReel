@@ -244,6 +244,7 @@ reachreel run VIDEO [options]
 | `--config FILE` | 无 | TOML 配置文件 |
 | `--bgm FILE` | 随机 | 指定 BGM 文件 |
 | `--bgm-dir DIR` | `bgm` | BGM 目录 |
+| `--bgm-fade N` | `2.0` | BGM 结尾淡出秒数 |
 | `--no-bgm` | 关 | 不混 BGM |
 | `--voice NAME` | `zf_xiaoxiao` | Kokoro 中文音色 |
 | `--tts ENGINE` | `kokoro` | `kokoro` 或 `say`（调试用） |
@@ -262,6 +263,7 @@ reachreel run VIDEO [options]
 | `--fps N` | 原帧率 | 输出帧率 |
 | `--subtitle-size N` | `48` | 字幕字号（输出像素） |
 | `--subtitle-chars N` | `18` | 每行最多字数 |
+| `--subtitle-preset NAME` | 空 | `douyin` / `reels` / `shorts` / `landscape` 安全区预设，覆盖边距 |
 | `--subtitle-margin-v N` | `36` | 底部安全边距（输出像素） |
 | `--subtitle-margin-left N` | `50` | 左侧安全边距（输出像素） |
 | `--subtitle-margin-right N` | `50` | 右侧安全边距（输出像素） |
@@ -270,11 +272,12 @@ reachreel run VIDEO [options]
 | `--qa-strict` | 关 | QA 出现警告也返回非 0 |
 | `--only STAGES` | 全部 | 只运行指定阶段，逗号分隔，如 `vlm,script` |
 | `--dry-run` | 关 | 只打印将要运行的阶段和缓存状态，不调用模型、不写文件 |
+| `--review-script` | 关 | 跑到脚本阶段停下，输出 `script.md` 供人工确认 |
 | `--force` | 关 | 忽略所有中间产物，全部重做 |
 | `--no-resume` | 关 | 不复用场景/解说，但保留 VLM/TTS 缓存 |
 | `--verbose` | 关 | 调试日志 |
 
-> 全局选项：`--lang en|zh-CN` 切换 CLI 语言；`--content-language zh|en` 切换旁白/字幕语言。两者互相独立。
+> 全局选项：`--lang en|zh-CN` 切换 CLI 语言；`--content-language zh|en` 切换旁白/字幕语言。两者互相独立。`--cache-dir DIR` 与 `--no-cache` 控制共享缓存。
 
 常用：
 
@@ -287,6 +290,12 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script
 
 # 只重做字幕和成片
 reachreel run video.mp4 --workdir output/xxx --only subtitles,mix,render
+
+# 先出脚本，人工确认 script.md 后继续
+reachreel run video.mp4 --workdir output/xxx --review-script
+# 编辑 output/xxx/script.json 后：
+reachreel tts output/xxx
+reachreel subtitle output/xxx && reachreel mix output/xxx && reachreel render output/xxx
 ```
 
 `--only` 的可用阶段：`probe`、`vlm`（别名 `analyze`）、`script`、`tts`、`subtitles`（别名 `subtitle`）、`mix`、`render`、`qa`。选中的阶段会主动重做；未选中的阶段不动。依赖的中间文件不存在时会给出可执行的下一步提示。
@@ -330,7 +339,10 @@ reachreel render output/ski_20261121_203000 --no-burn
 
 ```bash
 reachreel doctor
+reachreel doctor --json
 ```
+
+`--json` 输出机器可读报告：`{"ok": true, "checks": [{"id", "label", "value", "status", "required", "ok"}]}`。
 
 检查项：
 
@@ -418,6 +430,27 @@ reachreel licenses output/xxx --out /tmp/licenses.md
 
 命令从 `manifest.json` 读取 `bgm_metadata`（在 `mix` 阶段由 `inputs/bgm/manifest.json` 写入），并输出 `licenses.md`。如果工作目录是在目录文件出现之前混的音，先重新运行 `reachreel mix output/xxx`。
 
+### 7.8 `reachreel cache`
+
+共享缓存默认在平台缓存目录（macOS 为 `~/Library/Caches/reachreel`），同一素材/同一段文本换工作目录时可以复用 VLM 分析和 TTS 音频。如果旧的 `~/.cache/reachreel` 存在且新目录不存在，则继续使用旧目录。
+
+```bash
+reachreel cache info
+reachreel cache clean --dry-run
+reachreel cache clean --yes
+```
+
+`cache info` 显示位置、文件数和大小；`cache clean` 不加 `--yes` 不会删除，加 `--dry-run` 只预览。
+
+单次运行关闭共享缓存（全局参数放在子命令前面）：
+
+```bash
+reachreel --no-cache run video.mp4 --workdir output/xxx
+reachreel --cache-dir /tmp/rr-cache run video.mp4
+```
+
+字幕可用 `--subtitle-preset douyin|reels|shorts|landscape`（或配置里的 `subtitle_preset`）套用平台安全区，预设会覆盖手动边距。
+
 ---
 
 ## 8. 输出目录
@@ -428,6 +461,7 @@ output/<视频名>_<时间戳>/
 ├── subtitles.srt      # 字幕（软字幕/兼容）
 ├── subtitles.ass      # 硬字幕布局（PlayRes = 输出分辨率）
 ├── script.json        # 分段解说词（可编辑）
+├── script.md          # 脚本确认用的预览
 ├── scenes.json        # 镜头 + VLM 分析
 ├── vlm_cache.json     # VLM 断点缓存
 ├── timeline.json      # 旁白落点
@@ -571,6 +605,7 @@ reachreel mix      output/xxx   # 重做混音
 reachreel render   output/xxx   # 重新渲染
 reachreel qa       output/xxx   # 质量检查
 reachreel licenses output/xxx   # 导出 BGM 授权清单
+reachreel cache info            # 共享缓存位置和大小
 ```
 
 ### 10.2 只改字幕

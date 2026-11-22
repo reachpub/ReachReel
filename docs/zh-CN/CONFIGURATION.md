@@ -150,11 +150,27 @@ Kokoro 中文音色：
 | `subtitle_max_seconds` | `6.0` | 单条字幕最长显示时间 |
 | `subtitle_font` | `PingFang SC` | 字体 |
 | `subtitle_size` | `48` | 字幕字号（输出像素） |
+| `subtitle_preset` | `""` | 平台安全区预设：`douyin` / `reels` / `shorts` / `landscape` |
 | `subtitle_margin_v` | `36` | 底部安全边距（输出像素） |
 | `subtitle_margin_left` | `50` | 左侧安全边距（输出像素） |
 | `subtitle_margin_right` | `50` | 右侧安全边距（输出像素） |
 
 硬字幕会生成 `subtitles.ass`，其中 `PlayResX/Y` 等于输出分辨率，所以上面的字号和边距就是成片里的真实像素，不再受 libass 默认 384×288 缩放影响。软字幕仍然使用 `subtitles.srt`。
+
+平台预设会设置三个边距，并优先于 `subtitle_margin_*`：
+
+```toml
+subtitle_preset = "douyin"   # douyin | reels | shorts | landscape
+```
+
+| 预设 | 底部 | 左 | 右 |
+|---|---|---|---|
+| `douyin` | 280 | 80 | 80 |
+| `reels` | 260 | 90 | 90 |
+| `shorts` | 320 | 80 | 80 |
+| `landscape` | 40 | 60 | 60 |
+
+保持 `subtitle_preset = ""` 即可手动调 `subtitle_margin_*`。
 
 竖屏建议：
 
@@ -194,6 +210,8 @@ reachreel render output/xxx --subtitle-size 52
 | `ambient_duck_db` | `-10.0` | 原声闪避深度 |
 | `target_lufs` | `-14.0` | 成品响度目标 |
 | `true_peak` | `-1.5` | 真峰值上限 dBTP |
+| `two_pass_loudnorm` | `true` | 先测量混音，再线性归一 |
+| `bgm_fade_seconds` | `2.0` | BGM 结尾淡出秒数；`0` 关闭 |
 
 `bgm_duck_db` / `ambient_duck_db` 会换算成 `sidechaincompress` 的 ratio（约 `abs(db)/2`，限制在 2–20）。不是精确的 dB 衰减，而是“压多狠”的近似控制。
 
@@ -224,6 +242,15 @@ ambient_duck_db = -8.0
 | `audio_bitrate` | `192k` | AAC 码率 |
 | `burn_subtitles` | `true` | 是否烧硬字幕 |
 | `work_root` | `output` | 默认工作目录根 |
+| `cache_enabled` | `true` | 跨工作目录复用 VLM 分析结果和 TTS 音频 |
+| `cache_dir` | `""` | 共享缓存根目录；空表示平台缓存目录（macOS 为 `~/Library/Caches/reachreel`，旧 `~/.cache/reachreel` 存在时优先复用） |
+
+共享缓存按“视频采样指纹”存 VLM 结果，按“文本/模型/音色”存 TTS 音频。可用 `cache_enabled = false`、`REACHREEL_CACHE=0` 或全局 `--no-cache` 关闭。管理命令：
+
+```bash
+reachreel cache info
+reachreel cache clean --yes
+```
 
 常用：
 
@@ -293,6 +320,8 @@ skip_subtitle_pixels = false
 | `REACHREEL_BGM_DIR` | `bgm_dir` |
 | `REACHREEL_WHISPER_MODEL` | `whisper_model` |
 | `REACHREEL_TTS_ENGINE` | `tts_engine` |
+| `REACHREEL_CACHE_DIR` | `cache_dir` |
+| `REACHREEL_CACHE` | 设为 `0` / `false` 关闭共享缓存（`cache_enabled`） |
 | `FFMPEG_FULL` | 指定带 libass 的 ffmpeg 路径 |
 
 示例：
@@ -353,6 +382,7 @@ subtitle_max_lines = 2
 subtitle_max_seconds = 6.0
 subtitle_font = "PingFang SC"
 subtitle_size = 48
+subtitle_preset = ""
 subtitle_margin_v = 60
 subtitle_margin_left = 50
 subtitle_margin_right = 50
@@ -366,6 +396,8 @@ ambient_volume = 0.16
 ambient_duck_db = -10.0
 target_lufs = -14.0
 true_peak = -1.5
+two_pass_loudnorm = true
+bgm_fade_seconds = 2.0
 
 # 渲染
 output_height = 1080
@@ -375,6 +407,8 @@ preset = "medium"
 audio_bitrate = "192k"
 burn_subtitles = true
 work_root = "output"
+cache_enabled = true
+cache_dir = ""
 
 # QA（可选覆盖）
 [qa]

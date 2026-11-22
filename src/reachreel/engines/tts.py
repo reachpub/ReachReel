@@ -241,6 +241,7 @@ def synthesize_segments(
     speed: float = 1.0,
     force: bool = False,
     retries: int = 2,
+    shared_dir: Path | None = None,
 ) -> list[QualityFlag]:
     """Synthesize each segment, retrying and isolating per-segment failures.
 
@@ -257,12 +258,30 @@ def synthesize_segments(
             f"{settings.tts_engine}|{settings.kokoro_model}|{settings.voice}|{speed:.4f}|{segment.text}".encode()
         ).hexdigest()[:16]
         out = audio_dir / f"seg_{index:03d}_{key}.wav"
+        shared = shared_dir / f"{key}.wav" if shared_dir is not None else None
         if out.exists() and not force and out.stat().st_size > 1000:
             segment.audio_path = str(out)
             segment.duration = _wav_duration(out)
             segment.tts_speed = speed
             LOG.info("  [%d/%d] TTS cache hit: %.2fs", index, len(segments), segment.duration)
             continue
+        if shared is not None and shared.exists() and shared.stat().st_size > 1000:
+            try:
+                out.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(shared, out)
+            except OSError as exc:
+                LOG.warning("Could not read the shared TTS cache %s: %s", shared, exc)
+            else:
+                segment.audio_path = str(out)
+                segment.duration = _wav_duration(out)
+                segment.tts_speed = speed
+                LOG.info(
+                    "  [%d/%d] TTS shared-cache hit: %.2fs",
+                    index,
+                    len(segments),
+                    segment.duration,
+                )
+                continue
         LOG.info("  [%d/%d] Synthesizing: %s", index, len(segments), segment.text[:30])
         try:
             duration = _synthesize_with_retries(
@@ -298,6 +317,12 @@ def synthesize_segments(
         segment.audio_path = str(out)
         segment.duration = duration
         segment.tts_speed = speed
+        if shared is not None:
+            try:
+                shared.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(out, shared)
+            except OSError as exc:
+                LOG.warning("Could not update the shared TTS cache %s: %s", shared, exc)
         LOG.info("         done in %.2fs", duration)
 
     if segments and failed == len(segments):

@@ -43,6 +43,11 @@
 - **P0-1 旋转元数据（已完成）**：显示/编码宽高分离，并补齐旋转测试。
 - **P0-3 重试与 quality flags（已完成）**：VLM/LLM/TTS/Whisper 重试或回退，降级写入 `manifest.quality_flags`。
 - **P0-8 BGM 元数据（已完成）**：`inputs/bgm/manifest.json`、`manifest.bgm_metadata`、`reachreel licenses`。
+- **P0-4 字幕安全区（已完成）**：平台预设、标点/单词断句、按停顿加权的时间分配、硬性行数/字数约束。
+- **P0-7 跨工作目录缓存（已完成）**：视频指纹 VLM 缓存、按内容键控的 TTS 音频、`cache info` / `cache clean`。
+- **P0-9 macOS 部分（已完成）**：UTF-8 子进程、`platformdirs` 缓存、`doctor --json`、中文/空格路径集成 smoke。
+- **P1-3 人工确认闸门（已完成）**：`--review-script` 生成 `script.md` 并在 TTS 前停下。
+- **P1-4 音频（已完成）**：两遍 `loudnorm`（失败回退单遍）和 BGM 结尾淡出。
 - 旋转/竖屏显示分辨率修正。
 - `render` 复用 `manifest.render_settings`。
 
@@ -87,17 +92,15 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 
 **验收**：断网/Ollama 挂掉/模型不存在时，报错能直接指出“哪一步、哪个文件、怎么修”。已通过。
 
-### P0-4 字幕安全区与断句
+### P0-4 字幕安全区与断句（已完成）
 
-- 已完成：像素字号/边距、`PlayRes` 与输出一致的 ASS 硬字幕、字幕像素超框 QA；换行丢字已修复。
-- 现有：字幕切分优先标点；时间仍按字数比例分配，可能把半句话的时间拆开。
-- 待办：
-  - 竖屏/横屏平台安全区预设（抖音/Reels/Shorts）；
-  - 断句时间更贴合语音停顿；
-  - 单条字幕不超过 2 行、每行不超过 N 字的硬约束；
-  - 旧工作目录的字幕样式迁移提示。
+- `subtitle_preset` 支持 `douyin` / `reels` / `shorts` / `landscape`；预设同时作用于 ASS 输出和 QA，并覆盖手动边距。
+- 中文优先按标点切分；空格语言按整词打包，不再把单词拆开。
+- 字幕时长按“字数 + 句末/逗号停顿加成”加权。
+- `subtitle_max_chars` 和 `subtitle_max_lines` 是硬约束。
+- 旧工作目录字幕样式迁移说明在 CONFIGURATION 中。
 
-**验收**：随机抽 20 条字幕，无丢字、无超框、无半句断开。
+**验收**：随机抽 20 条字幕，无丢字、无超框、无半句断开。已由单元测试和集成 smoke 覆盖。
 
 ### P0-5 QA 闸门（已完成）
 
@@ -132,14 +135,13 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 
 **验收**：PR 必须过 lint + tests；核心路径有回归测试。
 
-### P0-7 缓存键与跨工作目录复用
+### P0-7 缓存键与跨工作目录复用（已完成）
 
-- 现在 VLM/TTS 缓存按 `workdir` 局部保存；
-- 待办：
-  - 视频内容 hash + 模型 + prompt 版本作为全局缓存键；
-  - 可选 `~/.cache/reachreel/`；
-  - 同一素材换项目目录也能复用；
-  - 缓存清理命令。
+- VLM 结果以“视频采样指纹 + 模型 + prompt 版本 + 语言 + 抽帧宽度 + brief”为键。
+- TTS 音频以“engine + model + voice + speed + text”为键。
+- 可选共享根目录默认使用平台缓存目录，可用 `cache_dir` 覆盖。
+- 工作目录缓存仍是主要可见产物，共享缓存会合并进去。
+- `reachreel cache info` / `cache clean --yes` 用于查看和清理。
 
 ### P0-8 BGM 元数据（已完成）
 
@@ -147,18 +149,26 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 - `mix` 把匹配记录写入 `manifest.json` 的 `bgm_metadata`。
 - `reachreel licenses <workdir>` 生成发布前复核用的 `licenses.md`。
 
-### P0-9 跨平台正确性（面板之前必须完成）
+### P0-9 跨平台正确性（macOS 部分已完成；Windows 待做）
 
 详见 [DESKTOP_ARCHITECTURE.md §9](DESKTOP_ARCHITECTURE.md)。
 
-- `util.run` 子进程加 `encoding="utf-8"`（Windows 中文路径会 `UnicodeDecodeError`）；
-- 路径改用 `platformdirs`，去掉 CWD 依赖（`.app` / `.exe` 里 `output/` 必然失败）；
-- 拆 extras（`accel-mlx` / `cpu` / `gui`），剔除未使用的 `torch`（580 MB）；
-- 随包分发子集化中文字体 + `fontsdir`，保证三平台字幕渲染一致、QA 不误报；
-- FFmpeg 探测优先使用「应用自带」二进制；
-- `doctor --json`，供面板渲染可用性矩阵。
+macOS 已完成：
 
-**验收**：非 ASCII 文件名与含空格路径在三个平台都能跑到 `final.mp4`。
+- `util.run` 子进程使用 UTF-8 + replacement；
+- 共享缓存改用 `platformdirs`（`~/Library/Caches/reachreel`），并兼容旧目录；
+- `doctor --json` 输出可用性矩阵；
+- 集成 smoke 在中文/空格路径下跑通并烧录字幕。
+
+Windows/桌面端待做：
+
+- `work_root` 去掉 CWD 依赖（`.app` / `.exe`）；
+- 拆 extras（`accel-mlx` / `cpu` / `gui`）；
+- 内置子集化中文字体 + `fontsdir`；
+- FFmpeg 探测优先使用应用自带二进制；
+- 用跨平台 TTS/ASR 替换 MLX（P2-1）。
+
+**验收**：非 ASCII 文件名与含空格路径在三个平台都能跑到 `final.mp4`。macOS 已通过；Windows 等 P2-1。
 
 ### P0-10 代码语言与字符串外置（面板之前必须完成）
 
@@ -200,24 +210,26 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 
 ### P1-3 写稿质量
 
+- 已完成：人工审核 gate（`--review-script` 生成 `script.md`，配音前停下）；
 - 事实约束：每个句子必须能追溯到某个 `scene_id` 的 VLM 证据；
 - 专有名词白名单（来自 `brief`）；
 - 风格预设：Vlog / 纪录片 / 吐槽 / 治愈 / 悬疑；
 - 开头 3 秒 Hook；
 - 段落时长预算：按 TTS 实际时长反推字数，而不是只按目标字数；
-- 人工审核 gate：先出 `script.md`，确认后再配音。
+- 开头 3 秒 Hook 的质量指标。
 
 ### P1-4 音频质量
 
-- 两遍 `loudnorm`（先测量再线性归一），减少动态压缩；
+- 已完成：两遍 `loudnorm`（先测量再线性归一，失败回退单遍）；
+- 已完成：BGM 按 `bgm_fade_seconds` 结尾淡出；
 - BGM 结构感知闪避（前奏/副歌不同深度）；
 - 原声降噪/去风噪；
 - Demucs 分离人声/环境声，避免原片说话与旁白打架；
-- 片尾 BGM 淡出；
 - 可选“只保留环境声，去掉原片人声”。
 
 ### P1-5 字幕升级
 
+- 已完成：竖屏/横屏安全区预设（`subtitle_preset`）；
 - 逐字/逐词高亮（卡拉 OK）；
 - 双语字幕；
 - 字幕模板：底部条、顶部标题、人物名牌；
@@ -308,7 +320,7 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 
 ## 版本里程碑建议
 
-### v0.2 — 可交付
+### v0.2 — 可交付（已发布 0.2.0）
 
 - P0-1 ~ P0-4；
 - 阶段级命令；

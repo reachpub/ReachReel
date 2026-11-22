@@ -4,11 +4,12 @@ from __future__ import annotations
 import json
 import shutil
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ..core.cache import cache_root, tts_cache_dir, video_key, vlm_cache_path
 from ..core.config import Settings, settings_to_dict
 from ..core.util import LOG, atomic_write_json, ffmpeg_full, read_json
 from ..domain.models import (
@@ -68,6 +69,13 @@ STAGE_ARTIFACTS = {
 }
 
 
+def review_stages(stages: list[str]) -> list[str]:
+    """Truncate a stage list at ``script`` for the human review gate."""
+    if "script" not in stages:
+        raise ValueError(t("error.review_script_needs_script"))
+    return stages[: stages.index("script") + 1]
+
+
 def parse_only(value: str | list[str] | tuple[str, ...] | None) -> list[str] | None:
     """Parse `--only vlm,script` into canonical stages, preserving pipeline order."""
     if value is None:
@@ -117,6 +125,7 @@ class Pipeline:
         self.scenes_path = self.workdir / "scenes.json"
         self.vlm_cache_path = self.workdir / "vlm_cache.json"
         self.script_path = self.workdir / "script.json"
+        self.script_md_path = self.workdir / "script.md"
         self.timeline_path = self.workdir / "timeline.json"
         self.narration_path = self.workdir / "narration.wav"
         self.subtitles_path = self.workdir / "subtitles.srt"
@@ -136,6 +145,10 @@ class Pipeline:
         self.quality_flags: list[QualityFlag] = []
         # Stages re-executed in this process; their old quality flags are dropped.
         self.refreshed_stages: set[str] = set()
+        self.shared_cache_root = (
+            cache_root(self.settings.cache_dir) if self.settings.cache_enabled else None
+        )
+        self._video_key: str | None = None
 
     # ---------- stages ----------
 
@@ -161,7 +174,13 @@ class Pipeline:
             if Path(cached_info.path).resolve() != self.video:
                 LOG.warning("Scene analysis in the workdir belongs to a different video; re-analyzing")
             else:
-                self._info, self._scenes = cached_info, cached_scenes
+                # Always trust a fresh probe: scenes.json written by an older
+                # version may lack rotation/coded dimensions.
+                if cached_info != info:
+                    LOG.info("Refreshing video metadata in scenes.json")
+                    save_scenes(self.scenes_path, info, cached_scenes)
+                self._info = info
+                self._scenes = cached_scenes
                 LOG.info("Reusing scene analysis (%d scenes)", len(self._scenes))
                 return
         LOG.info("Detecting scenes...")
@@ -185,12 +204,22 @@ class Pipeline:
         save_scenes(self.scenes_path, info, scenes)
         self._scenes = scenes
 
+    def video_cache_key(self) -> str:
+        if self._video_key is None:
+            self._video_key = video_key(self.video)
+        return self._video_key
+
     def understand(self, *, force: bool | None = None) -> None:
         assert self._scenes is not None
         self.refreshed_stages.add("vlm")
         force = self.force if force is None else force
         if force:
             self.vlm_cache_path.unlink(missing_ok=True)
+        shared_cache_path = (
+            vlm_cache_path(self.shared_cache_root, self.video_cache_key())
+            if self.shared_cache_root is not None
+            else None
+        )
         self.quality_flags.extend(
             analyze_scenes(
                 self._scenes,
@@ -198,6 +227,7 @@ class Pipeline:
                 model=self.settings.vlm_model,
                 workers=self.settings.vlm_workers,
                 cache_path=self.vlm_cache_path,
+                shared_cache_path=shared_cache_path,
                 max_width=self.settings.vlm_max_width,
                 force=force,
                 context=self.settings.brief,
@@ -254,6 +284,11 @@ class Pipeline:
                 self.settings,
                 speed=self.settings.tts_speed,
                 force=self.force,
+                shared_dir=(
+                    tts_cache_dir(self.shared_cache_root)
+                    if self.shared_cache_root is not None
+                    else None
+                ),
             )
         )
 
@@ -387,6 +422,9 @@ class Pipeline:
         self.prepare_scenes()
         self.understand()
         self.write_script(reuse=False)
+        self.write_manifest(started=time.time(), burned=False, announce=False)
+        self.write_script_md()
+        LOG.info("Review: %s", self.script_md_path)
         LOG.info("Next: reachreel tts %s", self.workdir)
 
     def stage_tts(self) -> None:
@@ -514,15 +552,25 @@ class Pipeline:
         qa_strict: bool = False,
         only: str | list[str] | tuple[str, ...] | None = None,
         dry_run: bool = False,
+        review_script: bool = False,
     ) -> Path:
         selected = parse_only(only)
+        stages = selected or list(STAGE_ORDER)
+        if review_script:
+            stages = review_stages(stages)
         if dry_run:
-            self.print_dry_run(selected, qa=qa, qa_strict=qa_strict, burn=burn)
+            self.print_dry_run(
+                stages if (review_script or selected is not None) else None,
+                qa=qa,
+                qa_strict=qa_strict,
+                burn=burn,
+                explicit=selected is not None,
+                review=review_script,
+            )
             return self.output_path
 
         started = time.time()
         explicit = selected is not None
-        stages = selected or list(STAGE_ORDER)
         burned = self._run_stages(
             [stage for stage in stages if stage != "qa"],
             asr_engine=asr_engine,
@@ -531,6 +579,13 @@ class Pipeline:
             burn=burn,
             explicit=explicit,
         )
+
+        if review_script:
+            self.write_manifest(started=started, burned=False)
+            self.write_script_md()
+            LOG.info("Script review ready: %s", self.script_md_path)
+            LOG.info("Edit %s, then run: reachreel tts %s", self.script_path, self.workdir)
+            return self.script_path
 
         if explicit:
             if any(stage in stages for stage in ("tts", "subtitles", "mix", "render")):
@@ -556,10 +611,13 @@ class Pipeline:
         qa: bool = True,
         qa_strict: bool = False,
         burn: bool = True,
+        explicit: bool | None = None,
+        review: bool = False,
     ) -> None:
         """Describe what `run` would do without touching models or writing files."""
         info = self.load_video()
-        explicit = selected is not None
+        if explicit is None:
+            explicit = selected is not None
         stages = selected or list(STAGE_ORDER)
         settings = self.settings
         lines = [
@@ -579,7 +637,9 @@ class Pipeline:
             t("dry_run.workdir", value=self.workdir)
             + ("" if self.workdir.exists() else t("dry_run.workdir_new")),
             (
-                t("dry_run.mode_selected", stages=", ".join(stages))
+                t("dry_run.mode_review", stages=", ".join(stages))
+                if review
+                else t("dry_run.mode_selected", stages=", ".join(stages))
                 if explicit
                 else t("dry_run.mode_full")
             ),
@@ -666,6 +726,58 @@ class Pipeline:
             return t("stage_note.qa")
         return ""
 
+    def write_script_md(self) -> Path:
+        """Write a human-readable script preview with estimated placement."""
+        info = self.load_video()
+        segments = self._segments or []
+        scenes = self._scenes or []
+        cps = max(0.1, self.settings.speech_chars_per_second)
+        estimates = [
+            replace(
+                segment,
+                duration=max(1.0, len(segment.text) / cps),
+                start=0.0,
+                end=0.0,
+            )
+            for segment in segments
+        ]
+        if scenes:
+            place_segments(estimates, scenes, info.duration, self.settings)
+        lines = [
+            f"# {t('script_md.title', name=self.video.stem)}",
+            "",
+            t("script_md.video", path=self.video),
+            t("script_md.language", language=self.settings.content_language),
+            t("script_md.scenes", count=len(scenes)),
+            t("script_md.segments", count=len(segments)),
+            t("script_md.characters", count=sum(len(s.text) for s in segments)),
+            t(
+                "script_md.estimated",
+                seconds=sum(s.duration for s in estimates),
+                video_seconds=info.duration,
+            ),
+            "",
+            t("script_md.section"),
+            "",
+            t("script_md.table_header"),
+            "|---|---|---|---|---|",
+        ]
+        for segment in estimates:
+            scene_ids = ", ".join(str(scene_id) for scene_id in segment.scene_ids)
+            lines.append(
+                f"| {segment.id} | {scene_ids} | {segment.start:.1f} | "
+                f"{segment.end:.1f} | {segment.text} |"
+            )
+        lines += [
+            "",
+            t("script_md.section_edit"),
+            "",
+            t("script_md.edit_hint", workdir=self.workdir),
+            "",
+        ]
+        self.script_md_path.write_text("\n".join(lines), encoding="utf-8")
+        return self.script_md_path
+
     def write_review(self) -> None:
         info = self.load_video()
         segments = self._segments or []
@@ -732,6 +844,11 @@ class Pipeline:
             },
             "settings_snapshot": settings_to_dict(self.settings),
             "bgm_source": str(self.bgm_source) if self.bgm_source else None,
+            "cache": {
+                "enabled": self.shared_cache_root is not None,
+                "dir": str(self.shared_cache_root) if self.shared_cache_root else None,
+                "video_key": self.video_cache_key() if self.shared_cache_root else None,
+            },
             "bgm_metadata": self.bgm_metadata
             or (existing.get("bgm_metadata") if not self.bgm_disabled else None),
             "render_settings": {
@@ -742,6 +859,7 @@ class Pipeline:
                 "audio_bitrate": self.settings.audio_bitrate,
                 "subtitle_font": self.settings.subtitle_font,
                 "subtitle_size": self.settings.subtitle_size,
+                "subtitle_preset": self.settings.subtitle_preset,
                 "subtitle_margin_v": self.settings.subtitle_margin_v,
                 "subtitle_margin_left": self.settings.subtitle_margin_left,
                 "subtitle_margin_right": self.settings.subtitle_margin_right,
@@ -812,29 +930,44 @@ def _load_segments(data: dict[str, Any]) -> list[NarrationSegment]:
     return result
 
 
-def doctor(settings: Settings) -> int:
-    """Print a local environment report. Returns 0 when the essentials are present."""
+def doctor_report(settings: Settings) -> dict[str, Any]:
+    """Collect the environment availability matrix used by doctor and tools."""
     import importlib.util
+    import sys
     import urllib.request
 
-    print(t("doctor.title") + "\n" + "=" * 60)
+    checks: list[dict[str, Any]] = []
     ok = True
 
-    def line(label: str, value: str, good: bool = True, *, required: bool = True) -> None:
+    def add(
+        check_id: str,
+        label: str,
+        value: str,
+        good: bool = True,
+        *,
+        required: bool = True,
+    ) -> None:
         nonlocal ok
-        mark = "OK " if good else ("!! " if required else "-- ")
         if not good and required:
             ok = False
-        print(f"{mark}{label:<24} {value}")
+        checks.append(
+            {
+                "id": check_id,
+                "label": label,
+                "value": value,
+                "status": "ok" if good else ("missing" if required else "optional_missing"),
+                "required": required,
+                "ok": bool(good),
+            }
+        )
 
-    import sys
-
-    line(t("doctor.python"), sys.version.split()[0])
+    add("python", t("doctor.python"), sys.version.split()[0])
     for tool in ("ffmpeg", "ffprobe"):
         path = shutil.which(tool)
-        line(tool, path or t("doctor.missing"), bool(path))
+        add(tool, tool, path or t("doctor.missing"), bool(path))
     full = ffmpeg_full()
-    line(
+    add(
+        "ffmpeg_full",
         t("doctor.ffmpeg_full"),
         full or t("doctor.ffmpeg_full_missing"),
         bool(full),
@@ -844,19 +977,26 @@ def doctor(settings: Settings) -> int:
 
         filters = ffmpeg_filters(full or "ffmpeg")
         for name in ("subtitles", "sidechaincompress", "loudnorm", "blackdetect", "freezedetect"):
-            line(
+            add(
+                f"filter.{name}",
                 t("doctor.filter", name=name),
                 t("doctor.present") if name in filters else t("doctor.missing"),
                 name in filters,
             )
     except Exception as exc:  # noqa: BLE001
-        line(t("doctor.filter_check"), str(exc), False)
+        add("filter_check", t("doctor.filter_check"), str(exc), False)
 
     for module in ("mlx_audio", "mlx_whisper"):
         found = importlib.util.find_spec(module) is not None
-        line(module, t("doctor.installed") if found else t("doctor.missing"), found)
+        add(
+            f"module.{module}",
+            module,
+            t("doctor.installed") if found else t("doctor.missing"),
+            found,
+        )
     misaki = importlib.util.find_spec("misaki") is not None
-    line(
+    add(
+        "module.misaki",
         "misaki (Kokoro zh)",
         t("doctor.installed") if misaki else t("doctor.misaki_missing"),
         misaki,
@@ -866,16 +1006,20 @@ def doctor(settings: Settings) -> int:
         with urllib.request.urlopen(f"{settings.ollama_url.rstrip('/')}/api/tags", timeout=4) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         names = [m.get("name", "") for m in data.get("models", [])]
-        line(t("doctor.ollama"), settings.ollama_url)
+        add("ollama", t("doctor.ollama"), settings.ollama_url)
         for model in (settings.vlm_model, settings.llm_model):
-            present = any(name == model or name.startswith(model.split(":")[0] + ":") for name in names)
-            line(
+            present = any(
+                name == model or name.startswith(model.split(":")[0] + ":") for name in names
+            )
+            add(
+                f"model.{model}",
                 t("doctor.model", name=model),
                 t("doctor.present") if present else t("doctor.model_missing"),
                 present,
             )
     except Exception as exc:  # noqa: BLE001
-        line(
+        add(
+            "ollama",
             t("doctor.ollama"),
             t("doctor.unreachable", url=settings.ollama_url, error=exc),
             False,
@@ -887,7 +1031,8 @@ def doctor(settings: Settings) -> int:
         from ..media.audio import AUDIO_EXTS
 
         tracks = [p.name for p in bgm.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_EXTS]
-    line(
+    add(
+        "bgm",
         t("doctor.bgm_folder"),
         t("doctor.bgm_tracks", path=bgm, count=len(tracks))
         if tracks
@@ -895,7 +1040,24 @@ def doctor(settings: Settings) -> int:
         bool(tracks),
         required=False,
     )
+    return {"ok": ok, "checks": checks}
 
+
+def doctor(settings: Settings, *, as_json: bool = False) -> int:
+    """Print a local environment report. Returns 0 when the essentials are present."""
+    report = doctor_report(settings)
+    if as_json:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0 if report["ok"] else 1
+    print(t("doctor.title") + "\n" + "=" * 60)
+    for check in report["checks"]:
+        if check["ok"]:
+            mark = "OK "
+        elif check["required"]:
+            mark = "!! "
+        else:
+            mark = "-- "
+        print(f"{mark}{check['label']:<24} {check['value']}")
     print("=" * 60)
-    print(t("doctor.ready") if ok else t("doctor.fix"))
-    return 0 if ok else 1
+    print(t("doctor.ready") if report["ok"] else t("doctor.fix"))
+    return 0 if report["ok"] else 1

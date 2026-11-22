@@ -40,6 +40,8 @@ subtitle_max_lines = 2
 subtitle_max_seconds = 6.0
 subtitle_font = "PingFang SC"
 subtitle_size = 48          # output pixels; hard subtitles use ASS with PlayRes = output resolution
+# "" | douyin | reels | shorts | landscape. A preset overrides the three margins below.
+subtitle_preset = ""
 subtitle_margin_v = 36      # bottom margin in pixels; 180-260 is typical for portrait platforms
 subtitle_margin_left = 50
 subtitle_margin_right = 50
@@ -52,6 +54,8 @@ ambient_volume = 0.16
 ambient_duck_db = -10.0
 target_lufs = -14.0
 true_peak = -1.5
+two_pass_loudnorm = true   # measure first, then linear-normalize
+bgm_fade_seconds = 2.0     # fade the BGM out over the final seconds; 0 disables
 
 crf = 18
 preset = "medium"
@@ -60,6 +64,11 @@ output_height = 0   # 0 = keep source resolution; 1080 is recommended for 4K sou
 output_fps = 0      # 0 = keep source fps; 30 is recommended for 4K60 sources
 burn_subtitles = true
 work_root = "output"
+
+# Shared cache across work directories. Empty cache_dir = platform cache dir
+# (macOS: ~/Library/Caches/reachreel; legacy ~/.cache/reachreel is reused if present).
+cache_enabled = true
+cache_dir = ""
 
 # Optional QA thresholds. See docs/CONFIGURATION.md for the full list.
 [qa]

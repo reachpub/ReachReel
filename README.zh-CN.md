@@ -12,7 +12,7 @@
 
 没有云 API，没有按分钟计费。第一次运行会从 Hugging Face 下载 Kokoro 和 Whisper 模型，之后可以离线跑。
 
-> 当前状态：**可用的 MVP**。已在两条真实素材上跑通：
+> 当前状态：**v0.2.0**。已在两条真实素材上跑通：
 > 室内滑雪竖屏 82s、尼亚加拉瀑布横屏 93s，均输出 1080p、硬字幕、BGM 闪避。
 
 ---
@@ -30,6 +30,10 @@
 - **可恢复**：场景分析、VLM、解说、TTS 都有缓存；改文案只重做受影响的部分。
 - **失败可降级**：VLM/TTS/Whisper 会重试或回退，降级写入 `manifest.json` 的 `quality_flags`，不直接中断整条流程。
 - **授权可追踪**：可选的 `inputs/bgm/manifest.json` 元数据；`reachreel licenses <workdir>` 导出 `licenses.md`。
+- **跨目录缓存**：VLM 分析与 TTS 音频通过平台缓存目录（macOS 为 `~/Library/Caches/reachreel`）复用；`--no-cache` 可关闭，`reachreel cache clean --yes` 可清理。
+- **字幕预设**：`--subtitle-preset douyin|reels|shorts|landscape` 套用平台安全区；每行字数与行数是硬约束。
+- **脚本确认闸门**：`run --review-script` 生成 `script.md` 后停下，先改脚本再花钱配音。
+- **两遍响度**：先测量混音，再线性归一到达标 LUFS；BGM 在结尾自动淡出。
 - **双语 CLI**：`--lang en|zh-CN` 切换界面；`--content-language zh|en` 独立选择旁白/字幕语言与提示词包。
 
 ---

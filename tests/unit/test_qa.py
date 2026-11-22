@@ -5,7 +5,12 @@ from pathlib import Path
 
 from reachreel.cli.main import build_parser, main
 from reachreel.core.config import Settings, settings_to_dict
-from reachreel.pipeline.orchestrator import STAGE_ORDER, _flag_stage, parse_only
+from reachreel.pipeline.orchestrator import (
+    STAGE_ORDER,
+    _flag_stage,
+    parse_only,
+    review_stages,
+)
 from reachreel.pipeline.qa import (
     Check,
     QAReport,
@@ -91,6 +96,42 @@ class QATests(unittest.TestCase):
             text = (Path(tmp) / "licenses.md").read_text(encoding="utf-8")
         self.assertIn("Calm", text)
         self.assertIn("CC0-1.0", text)
+
+    def test_cache_commands_are_registered(self):
+        parser = build_parser()
+        self.assertEqual(parser.parse_args(["cache", "info"]).cache_command, "info")
+        clean = parser.parse_args(["cache", "clean", "--dry-run"])
+        self.assertEqual(clean.cache_command, "clean")
+        self.assertTrue(clean.dry_run)
+        args = parser.parse_args(["--no-cache", "run", "/tmp/video.mp4"])
+        self.assertTrue(args.no_cache)
+        preset = parser.parse_args(
+            ["run", "/tmp/video.mp4", "--subtitle-preset", "douyin"]
+        )
+        self.assertEqual(preset.subtitle_preset, "douyin")
+        self.assertTrue(parser.parse_args(["doctor", "--json"]).json)
+        review = parser.parse_args(["run", "/tmp/video.mp4", "--review-script"])
+        self.assertTrue(review.review_script)
+        mix = parser.parse_args(["mix", "/tmp/workdir", "--bgm-fade", "3"])
+        self.assertEqual(mix.bgm_fade, 3.0)
+
+    def test_review_stages_stops_at_script(self):
+        self.assertEqual(review_stages(STAGE_ORDER), ["probe", "vlm", "script"])
+        self.assertEqual(review_stages(["probe", "script", "tts"]), ["probe", "script"])
+        with self.assertRaises(ValueError):
+            review_stages(["probe", "tts"])
+
+    def test_subtitle_margin_status_uses_preset(self):
+        status, details = subtitle_margin_status(
+            {"left": 100, "right": 100, "top": 0, "bottom": 1500},
+            width=1080,
+            height=1920,
+            settings={"subtitle_preset": "douyin"},
+            thresholds=QAThresholds(),
+        )
+        self.assertEqual(details["limits"], {"left": 80, "right": 80, "bottom": 280})
+        self.assertEqual(details["preset"], "douyin")
+        self.assertEqual(status, "pass")
 
     def test_quality_flag_stage_mapping(self):
         self.assertEqual(_flag_stage("vlm.scene_failed"), "vlm")

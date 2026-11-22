@@ -12,7 +12,7 @@ video -> FFmpeg scene detection -> Ollama qwen3-vl vision
 
 No cloud API and no per-minute billing. The first run downloads the Kokoro and Whisper models; after that the pipeline can run offline.
 
-> Status: working MVP. Validated on two real clips: an 82s indoor-ski vertical video and a 93s Niagara Falls landscape video, both rendered at 1080p with hard subtitles and BGM ducking.
+> Status: v0.2.0. Validated on two real clips: an 82s indoor-ski vertical video and a 93s Niagara Falls landscape video, both rendered at 1080p with hard subtitles, BGM ducking, and QA 20/20.
 
 ---
 
@@ -29,6 +29,10 @@ No cloud API and no per-minute billing. The first run downloads the Kokoro and W
 - **Resumable**: scene analysis, VLM, script, and TTS caches; changing one line only rebuilds the affected work.
 - **Fail-soft stages**: VLM/TTS/Whisper retry or fall back; degradations land in `manifest.json` as `quality_flags` instead of aborting the run.
 - **License tracking**: optional `inputs/bgm/manifest.json` metadata; `reachreel licenses <workdir>` exports `licenses.md`.
+- **Cross-workdir cache**: VLM analysis and TTS audio are reused through the platform cache dir (`~/Library/Caches/reachreel` on macOS); disable with `--no-cache` or clean with `reachreel cache clean --yes`.
+- **Subtitle presets**: `--subtitle-preset douyin|reels|shorts|landscape` applies platform safe areas; line length and line count are hard limits.
+- **Script review gate**: `run --review-script` stops after writing `script.md`, so you can edit the script before paying for TTS.
+- **Two-pass loudness**: the mix is measured first and linear-normalized to the target LUFS; the BGM fades out over the final seconds.
 - **Bilingual CLI**: `--lang en|zh-CN` switches the UI; `--content-language zh|en` independently selects the narration/subtitle language and prompt pack.
 
 ---

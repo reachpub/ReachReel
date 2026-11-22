@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 from pathlib import Path
 from typing import Any
 
@@ -113,6 +114,85 @@ def prepare_bgm_loop(bgm: Path, duration: float, out_wav: Path) -> None:
     )
 
 
+def _loudnorm_filter(settings: Settings, measured: dict[str, Any] | None = None) -> str:
+    result = f"loudnorm=I={settings.target_lufs}:TP={settings.true_peak}:LRA=11"
+    if measured:
+        result += (
+            f":measured_I={measured['input_i']}"
+            f":measured_TP={measured['input_tp']}"
+            f":measured_LRA={measured['input_lra']}"
+            f":measured_thresh={measured['input_thresh']}"
+            f":offset={measured['target_offset']}"
+            ":linear=true"
+        )
+    return result
+
+
+def _parse_loudnorm_json(stderr: str) -> dict[str, Any] | None:
+    for match in re.finditer(r"\{.*?\}", stderr or "", re.DOTALL):
+        try:
+            data = json.loads(match.group(0))
+        except ValueError:
+            continue
+        if not isinstance(data, dict) or "input_i" not in data:
+            continue
+        if str(data.get("input_i") or "").strip().lower() in {"-inf", "inf", "nan", ""}:
+            return None
+        return data
+    return None
+
+
+def _measure_loudness(
+    inputs: list[str],
+    filters: list[str],
+    duration: float,
+    settings: Settings,
+) -> dict[str, Any] | None:
+    probe_filters = filters + [
+        f"[premix]{_loudnorm_filter(settings)}:print_format=json[measure]"
+    ]
+    proc = run(
+        [
+            "ffmpeg",
+            "-hide_banner",
+            "-nostdin",
+            "-loglevel",
+            "info",
+            "-y",
+            *inputs,
+            "-filter_complex",
+            ";".join(probe_filters),
+            "-map",
+            "[measure]",
+            "-t",
+            f"{duration:.3f}",
+            "-f",
+            "null",
+            "-",
+        ],
+        check=False,
+    )
+    if proc.returncode != 0:
+        tail = "\n".join((proc.stderr or "").strip().splitlines()[-3:])
+        LOG.warning("Two-pass loudness measurement failed; using single-pass: %s", tail)
+        return None
+    measured = _parse_loudnorm_json(proc.stderr or "")
+    if measured is None:
+        LOG.warning("Could not parse the loudnorm measurement; using single-pass")
+    return measured
+
+
+def _bgm_filter(settings: Settings, duration: float, input_index: int = 2) -> str:
+    fade = max(0.0, min(float(settings.bgm_fade_seconds), duration))
+    fade_filter = ""
+    if fade > 0.1:
+        fade_filter = f",afade=t=out:st={max(0.0, duration - fade):.3f}:d={fade:.3f}"
+    return (
+        f"[{input_index}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+        f"volume={settings.bgm_volume:.3f}{fade_filter}[bgm]"
+    )
+
+
 def mix_audio(
     *,
     video: Path,
@@ -157,10 +237,7 @@ def mix_audio(
 
     if use_bgm:
         b_idx = 2
-        filters.append(
-            f"[{b_idx}:a]aformat=sample_rates=48000:channel_layouts=stereo,"
-            f"volume={settings.bgm_volume:.3f}[bgm]"
-        )
+        filters.append(_bgm_filter(settings, duration, b_idx))
         filters.append(
             "[bgm][sc_bgm]sidechaincompress="
             f"threshold=0.035:ratio={bgm_ratio:.1f}:attack=50:release=450:makeup=1[bgm_duck]"
@@ -168,17 +245,20 @@ def mix_audio(
         mix_inputs.append("[bgm_duck]")
 
     if len(mix_inputs) == 1:
-        filters.append(
-            f"[nar]loudnorm=I={settings.target_lufs}:TP={settings.true_peak}:LRA=11,"
-            "alimiter=limit=0.95[aout]"
-        )
+        filters.append("[nar]anull[premix]")
     else:
         filters.append(
             "".join(mix_inputs)
-            + f"amix=inputs={len(mix_inputs)}:duration=longest:normalize=0,"
-            + f"loudnorm=I={settings.target_lufs}:TP={settings.true_peak}:LRA=11,"
-            + "alimiter=limit=0.95[aout]"
+            + f"amix=inputs={len(mix_inputs)}:duration=longest:normalize=0[premix]"
         )
+
+    measured = None
+    if settings.two_pass_loudnorm:
+        measured = _measure_loudness(inputs, filters, duration, settings)
+    filters.append(
+        f"[premix]{_loudnorm_filter(settings, measured)},"
+        "alimiter=limit=0.95:level=false[aout]"
+    )
 
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     run(

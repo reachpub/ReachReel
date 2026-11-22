@@ -1,9 +1,17 @@
+import hashlib
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from reachreel.core.cache import (
+    cache_root,
+    cache_stats,
+    clean_cache,
+    format_bytes,
+    video_key,
+)
 from reachreel.core.config import Settings
 from reachreel.core.util import srt_timestamp
 from reachreel.domain.models import (
@@ -16,20 +24,31 @@ from reachreel.domain.models import (
 )
 from reachreel.domain.timeline import place_segments
 from reachreel.engines.tts import _synthesize_with_retries, synthesize_segments
+from reachreel.engines.vlm import PROMPT_VERSION, analyze_scenes
 from reachreel.generation.script import _extract_json_array
 from reachreel.i18n import set_language
-from reachreel.media.audio import bgm_license_markdown, bgm_metadata, load_bgm_catalog
+from reachreel.media.audio import (
+    _bgm_filter,
+    _loudnorm_filter,
+    _parse_loudnorm_json,
+    bgm_license_markdown,
+    bgm_metadata,
+    load_bgm_catalog,
+)
 from reachreel.media.render import output_dimensions
 from reachreel.media.scenes import display_dimensions
 from reachreel.media.subtitles import (
+    SUBTITLE_PRESETS,
     _cue_texts,
     _split_text,
     ass_timestamp,
     build_subtitles,
     cues_from_timeline,
     read_srt,
+    subtitle_margins,
     write_ass,
 )
+from reachreel.pipeline.orchestrator import Pipeline
 
 
 class UnitTests(unittest.TestCase):
@@ -242,6 +261,196 @@ class UnitTests(unittest.TestCase):
                 Settings(tts_engine="say"),
                 retries=0,
             )
+
+    def test_shared_cache_helpers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "cache"
+            (root / "vlm").mkdir(parents=True)
+            (root / "vlm" / "a.json").write_text("{}", encoding="utf-8")
+            (root / "tts").mkdir()
+            (root / "tts" / "b.wav").write_bytes(b"x" * 100)
+            self.assertEqual(cache_stats(root), {"files": 2, "bytes": 102})
+            self.assertEqual(clean_cache(root), {"files": 2, "bytes": 102})
+            self.assertFalse(root.exists())
+        self.assertEqual(format_bytes(0), "0 B")
+        self.assertEqual(format_bytes(1536), "1.5 KiB")
+
+    def test_cache_root_prefers_platform_dir_and_legacy_fallback(self):
+        self.assertEqual(cache_root("~/custom-cache").name, "custom-cache")
+        with tempfile.TemporaryDirectory() as tmp:
+            new = Path(tmp) / "new"
+            legacy = Path(tmp) / "legacy"
+            with patch(
+                "reachreel.core.cache.default_cache_root", return_value=new
+            ), patch("reachreel.core.cache.legacy_cache_root", return_value=legacy):
+                legacy.mkdir()
+                self.assertEqual(cache_root(None), legacy)
+                new.mkdir()
+                self.assertEqual(cache_root(None), new)
+
+    def test_video_key_is_stable_and_content_sensitive(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            first = Path(tmp) / "a.mp4"
+            second = Path(tmp) / "b.mp4"
+            first.write_bytes(b"a" * 3_000_000)
+            second.write_bytes(b"b" * 3_000_000)
+            self.assertEqual(video_key(first), video_key(first))
+            self.assertNotEqual(video_key(first), video_key(second))
+            self.assertEqual(len(video_key(first)), 20)
+
+    def test_vlm_shared_cache_reuse(self):
+        scenes = [Scene(id=1, start=0.0, end=2.0)]
+        settings_key = f"zh|qwen3-vl:8b-instruct|{PROMPT_VERSION}|768|"
+        with tempfile.TemporaryDirectory() as tmp:
+            shared = Path(tmp) / "shared.json"
+            local = Path(tmp) / "vlm_cache.json"
+            shared.write_text(
+                json.dumps(
+                    {
+                        "settings": settings_key,
+                        "scenes": {"1:0.000:2.000": {"summary": "cached summary"}},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            flags = analyze_scenes(
+                scenes,
+                base_url="http://127.0.0.1:1",
+                model="qwen3-vl:8b-instruct",
+                cache_path=local,
+                shared_cache_path=shared,
+                max_width=768,
+                context="",
+                content_language="zh",
+            )
+        self.assertEqual(scenes[0].summary, "cached summary")
+        self.assertEqual(flags, [])
+
+    def test_tts_shared_cache_reuse(self):
+        settings = Settings(tts_engine="say", voice="Tingting", kokoro_model="m")
+        text = "hello"
+        key = hashlib.sha1(
+            f"say|m|Tingting|1.0000|{text}".encode()
+        ).hexdigest()[:16]
+
+        class NeverEngine:
+            def synthesize(self, text, out, *, speed=1.0):
+                raise AssertionError("shared cache should avoid synthesis")
+
+        segment = NarrationSegment(id=1, scene_ids=[1], text=text)
+        with tempfile.TemporaryDirectory() as tmp:
+            shared_dir = Path(tmp) / "shared"
+            shared_dir.mkdir()
+            (shared_dir / f"{key}.wav").write_bytes(b"0" * 2048)
+            with patch(
+                "reachreel.engines.tts.make_engine", return_value=NeverEngine()
+            ), patch("reachreel.engines.tts._wav_duration", return_value=1.5):
+                flags = synthesize_segments(
+                    [segment],
+                    Path(tmp) / "tts",
+                    settings,
+                    shared_dir=shared_dir,
+                )
+            self.assertTrue(Path(segment.audio_path).exists())
+        self.assertEqual(segment.duration, 1.5)
+        self.assertEqual(flags, [])
+
+    def test_subtitle_presets_and_margins(self):
+        settings = Settings()
+        self.assertEqual(subtitle_margins(settings), (36, 50, 50))
+        self.assertEqual(
+            set(SUBTITLE_PRESETS), {"douyin", "reels", "shorts", "landscape"}
+        )
+        for name, preset in SUBTITLE_PRESETS.items():
+            settings.subtitle_preset = name
+            self.assertEqual(
+                subtitle_margins(settings),
+                (preset["margin_v"], preset["margin_left"], preset["margin_right"]),
+            )
+        settings.subtitle_preset = "bogus"
+        self.assertEqual(subtitle_margins(settings), (36, 50, 50))
+
+    def test_split_text_keeps_english_words(self):
+        text = "The wind crosses the valley and the light fades."
+        pieces = _split_text(text, 18)
+        self.assertTrue(pieces)
+        self.assertTrue(all(len(piece) <= 18 for piece in pieces))
+        self.assertEqual(" ".join(pieces).split(), text.split())
+
+    def test_cue_timing_favours_sentence_pauses(self):
+        segments = [
+            NarrationSegment(
+                id=1,
+                scene_ids=[1],
+                text="短。很长的第二句话。",
+                start=0.0,
+                end=4.0,
+                duration=4.0,
+            )
+        ]
+        cues = cues_from_timeline(segments, max_chars=8, max_lines=1)
+        self.assertEqual(len(cues), 2)
+        self.assertLess(cues[0].end - cues[0].start, cues[1].end - cues[1].start)
+
+    def test_write_ass_uses_preset_margins(self):
+        settings = Settings()
+        settings.subtitle_preset = "douyin"
+        settings.subtitle_size = 52
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "test.ass"
+            write_ass([Cue(0.0, 1.0, "x")], path, width=1080, height=1920, settings=settings)
+            text = path.read_text(encoding="utf-8")
+        self.assertIn(",2,80,80,280,1", text)
+
+    def test_loudnorm_helpers(self):
+        settings = Settings()
+        single = _loudnorm_filter(settings)
+        self.assertIn("loudnorm=I=-14.0", single)
+        self.assertNotIn("linear=true", single)
+        measured = {
+            "input_i": "-20.1",
+            "input_tp": "-3.2",
+            "input_lra": "5.1",
+            "input_thresh": "-30.2",
+            "target_offset": "0.1",
+        }
+        two = _loudnorm_filter(settings, measured)
+        self.assertIn("measured_I=-20.1", two)
+        self.assertIn("linear=true", two)
+        stderr = json.dumps(measured)
+        self.assertEqual(_parse_loudnorm_json(stderr)["input_i"], "-20.1")
+        self.assertIsNone(_parse_loudnorm_json('{"input_i": "-inf"}'))
+        self.assertIsNone(_parse_loudnorm_json("no json"))
+
+    def test_bgm_fade_filter(self):
+        settings = Settings()
+        settings.bgm_fade_seconds = 2.0
+        self.assertIn("afade=t=out:st=8.000:d=2.000", _bgm_filter(settings, 10.0))
+        settings.bgm_fade_seconds = 0.0
+        self.assertNotIn("afade", _bgm_filter(settings, 10.0))
+
+    def test_write_script_md(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workdir = Path(tmp) / "work"
+            pipeline = Pipeline(Path(tmp) / "clip.mp4", Settings(), workdir=workdir)
+            pipeline._info = VideoInfo(
+                path=str(Path(tmp) / "clip.mp4"),
+                duration=60.0,
+                width=1920,
+                height=1080,
+                fps=30.0,
+                has_audio=True,
+            )
+            pipeline._scenes = [Scene(id=1, start=0.0, end=10.0), Scene(id=2, start=10.0, end=20.0)]
+            pipeline._segments = [
+                NarrationSegment(id=1, scene_ids=[1], text="第一段。"),
+                NarrationSegment(id=2, scene_ids=[2], text="第二段。"),
+            ]
+            path = pipeline.write_script_md()
+            text = path.read_text(encoding="utf-8")
+        self.assertIn("第一段。", text)
+        self.assertIn("第二段。", text)
+        self.assertIn("| 1 | 1 |", text)
 
     def test_asr_fallback_records_quality_flag(self):
         with tempfile.TemporaryDirectory() as tmp, patch(

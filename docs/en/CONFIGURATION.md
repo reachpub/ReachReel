@@ -150,11 +150,27 @@ Kokoro Chinese voices:
 | `subtitle_max_seconds` | `6.0` | Maximum display time for a single subtitle cue |
 | `subtitle_font` | `PingFang SC` | Font |
 | `subtitle_size` | `48` | Subtitle font size (output pixels) |
+| `subtitle_preset` | `""` | Platform safe-area preset: `douyin` / `reels` / `shorts` / `landscape` |
 | `subtitle_margin_v` | `36` | Bottom safe margin (output pixels) |
 | `subtitle_margin_left` | `50` | Left safe margin (output pixels) |
 | `subtitle_margin_right` | `50` | Right safe margin (output pixels) |
 
 Hard subtitles generate `subtitles.ass`, where `PlayResX/Y` equals the output resolution. The font size and margins above are therefore real pixels in the final video and are no longer affected by libass's default 384×288 scaling. Soft subtitles still use `subtitles.srt`.
+
+Platform presets set the three margins and take precedence over `subtitle_margin_*`:
+
+```toml
+subtitle_preset = "douyin"   # douyin | reels | shorts | landscape
+```
+
+| Preset | Bottom | Left | Right |
+|---|---|---|---|
+| `douyin` | 280 | 80 | 80 |
+| `reels` | 260 | 90 | 90 |
+| `shorts` | 320 | 80 | 80 |
+| `landscape` | 40 | 60 | 60 |
+
+Leave `subtitle_preset = ""` to tune `subtitle_margin_*` manually.
 
 Portrait recommendations:
 
@@ -194,6 +210,8 @@ reachreel render output/xxx --subtitle-size 52
 | `ambient_duck_db` | `-10.0` | Ambient ducking depth |
 | `target_lufs` | `-14.0` | Target loudness for the final mix |
 | `true_peak` | `-1.5` | True-peak ceiling in dBTP |
+| `two_pass_loudnorm` | `true` | Measure the mix first, then linear-normalize |
+| `bgm_fade_seconds` | `2.0` | Fade the BGM out over the final N seconds; `0` disables |
 
 `bgm_duck_db` / `ambient_duck_db` are converted to the `sidechaincompress` ratio (roughly `abs(db)/2`, clamped to 2–20). This is not an exact dB attenuation but an approximate "how hard to duck" control.
 
@@ -224,6 +242,15 @@ ambient_duck_db = -8.0
 | `audio_bitrate` | `192k` | AAC bitrate |
 | `burn_subtitles` | `true` | Whether to burn hard subtitles |
 | `work_root` | `output` | Default work directory root |
+| `cache_enabled` | `true` | Reuse VLM analysis and TTS audio across work directories |
+| `cache_dir` | `""` | Shared cache root; empty means the platform cache dir (`~/Library/Caches/reachreel` on macOS, legacy `~/.cache/reachreel` reused if present) |
+
+The shared cache stores VLM results keyed by a sampled video fingerprint and TTS audio keyed by text/model/voice. Disable it with `cache_enabled = false`, `REACHREEL_CACHE=0`, or the global `--no-cache` flag. Manage it with:
+
+```bash
+reachreel cache info
+reachreel cache clean --yes
+```
 
 Common settings:
 
@@ -293,6 +320,8 @@ skip_subtitle_pixels = false
 | `REACHREEL_BGM_DIR` | `bgm_dir` |
 | `REACHREEL_WHISPER_MODEL` | `whisper_model` |
 | `REACHREEL_TTS_ENGINE` | `tts_engine` |
+| `REACHREEL_CACHE_DIR` | `cache_dir` |
+| `REACHREEL_CACHE` | Set to `0` / `false` to disable the shared cache (`cache_enabled`) |
 | `FFMPEG_FULL` | Path to an ffmpeg build with libass |
 
 Example:
@@ -353,6 +382,7 @@ subtitle_max_lines = 2
 subtitle_max_seconds = 6.0
 subtitle_font = "PingFang SC"
 subtitle_size = 48
+subtitle_preset = ""
 subtitle_margin_v = 60
 subtitle_margin_left = 50
 subtitle_margin_right = 50
@@ -366,6 +396,8 @@ ambient_volume = 0.16
 ambient_duck_db = -10.0
 target_lufs = -14.0
 true_peak = -1.5
+two_pass_loudnorm = true
+bgm_fade_seconds = 2.0
 
 # Rendering
 output_height = 1080
@@ -375,6 +407,8 @@ preset = "medium"
 audio_bitrate = "192k"
 burn_subtitles = true
 work_root = "output"
+cache_enabled = true
+cache_dir = ""
 
 # QA (optional overrides)
 [qa]

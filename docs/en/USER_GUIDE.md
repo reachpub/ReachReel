@@ -244,6 +244,7 @@ reachreel run VIDEO [options]
 | `--config FILE` | None | TOML configuration file |
 | `--bgm FILE` | Random | Specific BGM file |
 | `--bgm-dir DIR` | `bgm` | BGM directory |
+| `--bgm-fade N` | `2.0` | Fade the BGM out over the final N seconds |
 | `--no-bgm` | Off | Do not mix BGM |
 | `--voice NAME` | `zf_xiaoxiao` | Kokoro Chinese voice |
 | `--tts ENGINE` | `kokoro` | `kokoro` or `say` (for debugging) |
@@ -262,6 +263,7 @@ reachreel run VIDEO [options]
 | `--fps N` | Source frame rate | Output frame rate |
 | `--subtitle-size N` | `48` | Subtitle font size (output pixels) |
 | `--subtitle-chars N` | `18` | Maximum characters per line |
+| `--subtitle-preset NAME` | Empty | `douyin` / `reels` / `shorts` / `landscape` safe-area preset; overrides the margins |
 | `--subtitle-margin-v N` | `36` | Bottom safe margin (output pixels) |
 | `--subtitle-margin-left N` | `50` | Left safe margin (output pixels) |
 | `--subtitle-margin-right N` | `50` | Right safe margin (output pixels) |
@@ -270,11 +272,12 @@ reachreel run VIDEO [options]
 | `--qa-strict` | Off | Return non-zero even when QA only reports warnings |
 | `--only STAGES` | All | Run only the specified stages, comma-separated, e.g. `vlm,script` |
 | `--dry-run` | Off | Only print the stages that would run and their cache status; do not call models or write files |
+| `--review-script` | Off | Stop after the script stage and write `script.md` for review |
 | `--force` | Off | Ignore all intermediate artifacts and redo everything |
 | `--no-resume` | Off | Do not reuse scenes/script, but keep the VLM/TTS cache |
 | `--verbose` | Off | Debug logging |
 
-> Global options: `--lang en|zh-CN` switches the CLI language; `--content-language zh|en` switches narration/subtitle language. They are independent.
+> Global options: `--lang en|zh-CN` switches the CLI language; `--content-language zh|en` switches narration/subtitle language. They are independent. `--cache-dir DIR` and `--no-cache` control the shared cache.
 
 Common patterns:
 
@@ -287,6 +290,12 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script
 
 # Redo subtitles and the final render only
 reachreel run video.mp4 --workdir output/xxx --only subtitles,mix,render
+
+# Generate the script, review script.md, then continue
+reachreel run video.mp4 --workdir output/xxx --review-script
+# edit output/xxx/script.json, then:
+reachreel tts output/xxx
+reachreel subtitle output/xxx && reachreel mix output/xxx && reachreel render output/xxx
 ```
 
 Available `--only` stages: `probe`, `vlm` (alias `analyze`), `script`, `tts`, `subtitles` (alias `subtitle`), `mix`, `render`, `qa`. Selected stages are redone proactively; unselected stages are left untouched. If a required intermediate file is missing, the command prints an actionable next step.
@@ -330,7 +339,10 @@ Checks the environment:
 
 ```bash
 reachreel doctor
+reachreel doctor --json
 ```
+
+`--json` prints a machine-readable report: `{"ok": true, "checks": [{"id", "label", "value", "status", "required", "ok"}]}`.
 
 Checks:
 
@@ -418,6 +430,27 @@ reachreel licenses output/xxx --out /tmp/licenses.md
 
 The command reads `bgm_metadata` from `manifest.json` (populated from `inputs/bgm/manifest.json` during `mix`) and writes `licenses.md`. If the work directory was mixed before the catalog existed, run `reachreel mix output/xxx` again first.
 
+### 7.8 `reachreel cache`
+
+The shared cache lives in the platform cache directory (`~/Library/Caches/reachreel` on macOS) and lets a different work directory reuse VLM analysis and TTS audio for the same footage/text. If the legacy `~/.cache/reachreel` exists and the new directory does not, the legacy directory is used.
+
+```bash
+reachreel cache info
+reachreel cache clean --dry-run
+reachreel cache clean --yes
+```
+
+`cache info` prints the location, file count, and size. `cache clean` refuses to delete without `--yes`; `--dry-run` only reports what would be removed.
+
+Disable the shared cache for one run with the global flag before the subcommand:
+
+```bash
+reachreel --no-cache run video.mp4 --workdir output/xxx
+reachreel --cache-dir /tmp/rr-cache run video.mp4
+```
+
+For subtitles, `--subtitle-preset douyin|reels|shorts|landscape` (or `subtitle_preset` in config) applies platform safe margins and overrides the manual margin values.
+
 ---
 
 ## 8. Output directory
@@ -428,6 +461,7 @@ output/<video-name>_<timestamp>/
 ├── subtitles.srt      # subtitles (soft-subtitle compatible)
 ├── subtitles.ass      # hard-subtitle layout (PlayRes = output resolution)
 ├── script.json        # editable narration segments
+├── script.md          # script preview for the review gate
 ├── scenes.json        # scenes + VLM analysis
 ├── vlm_cache.json     # VLM resume cache
 ├── timeline.json      # narration placement
@@ -571,6 +605,7 @@ reachreel mix      output/xxx   # redo mixing
 reachreel render   output/xxx   # re-render
 reachreel qa       output/xxx   # quality checks
 reachreel licenses output/xxx   # export the BGM license list
+reachreel cache info            # shared cache location and size
 ```
 
 ### 10.2 Change subtitles only

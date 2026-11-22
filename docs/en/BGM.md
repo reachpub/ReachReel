@@ -69,6 +69,10 @@ No BGM is bundled with the repository. Put your own tracks in `inputs/bgm/`; all
 
 `mix` copies the matching entry into `manifest.json` as `bgm_metadata`, and `reachreel licenses <workdir>` renders it as `licenses.md`.
 
+## Fade-out
+
+The BGM fades out over the final `bgm_fade_seconds` (default 2 seconds) before the side-chain ducking stage. Set it to `0` in config or pass `--bgm-fade 0` to disable the fade.
+
 ## Licensing
 
 Use CC0 or clearly commercial-use-licensed music, and verify the license for every track before publishing. Do not redistribute third-party tracks in this repository without your own license review.

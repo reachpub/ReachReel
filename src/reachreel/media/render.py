@@ -33,6 +33,9 @@ def subtitle_style(settings: Settings) -> str:
     Kept for QA on workdirs rendered before ASS layout existed. New renders use
     `subtitles.ass`, where `subtitle_size` and margins are real output pixels.
     """
+    from .subtitles import subtitle_margins
+
+    margin_v, margin_l, margin_r = subtitle_margins(settings)
     return (
         f"FontName={settings.subtitle_font},"
         f"FontSize={settings.subtitle_size},"
@@ -43,9 +46,9 @@ def subtitle_style(settings: Settings) -> str:
         "Outline=1,"
         "Shadow=0,"
         "Alignment=2,"
-        f"MarginV={settings.subtitle_margin_v},"
-        f"MarginL={settings.subtitle_margin_left},"
-        f"MarginR={settings.subtitle_margin_right},"
+        f"MarginV={margin_v},"
+        f"MarginL={margin_l},"
+        f"MarginR={margin_r},"
         "WrapStyle=2"
     )
 

@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
 ### Added
 
 - CI workflow (`.github/workflows/ci.yml`) running Ruff, the unit suite, and `uv build` on macOS for Python 3.10 and 3.12.
@@ -14,15 +16,33 @@
 - VLM and Whisper calls now retry with backoff.
 - Optional `inputs/bgm/manifest.json` track catalog; `manifest.json` records `bgm_metadata`, and `reachreel licenses <workdir>` exports `licenses.md`.
 - `VideoInfo` now records `coded_width` / `coded_height` alongside the rotated display size.
+- Optional shared cache in the platform cache dir: VLM results keyed by a video fingerprint and TTS audio keyed by content, plus `reachreel cache info` and `cache clean`.
+- Global `--cache-dir` / `--no-cache` flags.
+- `subtitle_preset` platform safe areas (`douyin` / `reels` / `shorts` / `landscape`).
+- `reachreel doctor --json` for machine-readable environment checks.
+- The integration smoke now runs from a Chinese/space path, mixes a BGM track, and burns subtitles.
+- `run --review-script` stops after the script stage and writes `script.md` for human review.
+- Two-pass `loudnorm` (`two_pass_loudnorm`) with a single-pass fallback, and BGM fade-out (`bgm_fade_seconds` / `--bgm-fade`).
+- Subtitle splitting keeps English words intact, and cue timing adds a pause bonus after sentence/clause punctuation.
 
 ### Changed
 
 - Project license changed from MIT to Apache-2.0; added the full license text and a `NOTICE` file.
 - `--height` is consistently documented and logged as display height for rotated footage.
+- Subtitle line length and line count are enforced as hard limits; QA compares text with whitespace normalized.
+- Mixing now measures loudness first and then linear-normalizes by default, which adds one audio-only pass.
+- The shared cache now defaults to the platform cache dir (`~/Library/Caches/reachreel` on macOS) via `platformdirs`; the legacy `~/.cache/reachreel` is reused when the new directory does not exist yet.
 
 ### Fixed
 
 - Test paths in `docs/en/DEVELOPMENT.md` and `docs/zh-CN/DEVELOPMENT.md` now match the `tests/unit/` layout.
+- Reusing `scenes.json` no longer keeps stale video metadata; rotation and coded dimensions are refreshed from a fresh probe.
+
+### Validation
+
+- `output/ski` (1080x1920, 82s): full run with existing caches took 41s wall time; QA 20/20 pass.
+- `output/niagara` (1920x1080, 93s): full run with existing caches took 56s wall time; QA 20/20 pass.
+- `--review-script` wrote `script.md` on the ski work directory without re-running VLM or TTS.
 
 ## [0.1.0] - 2026-11-22
 

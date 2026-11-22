@@ -14,36 +14,40 @@ from ..domain.models import Cue, NarrationSegment, QualityFlag
 LOG = logging.getLogger("reachreel.media.subtitles")
 
 SRT_TIMECODE_RE = re.compile(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})")
+PUNCT_BREAK_RE = re.compile(r"[。！？；，、,.!?;：:]")
+ENDING_PUNCT = "。！？.!?"
+CLAUSE_PUNCT = "，、,;；：:"
+
+# Bottom margin and side margins in output pixels for common platforms.
+SUBTITLE_PRESETS: dict[str, dict[str, int]] = {
+    "douyin": {"margin_v": 280, "margin_left": 80, "margin_right": 80},
+    "reels": {"margin_v": 260, "margin_left": 90, "margin_right": 90},
+    "shorts": {"margin_v": 320, "margin_left": 80, "margin_right": 80},
+    "landscape": {"margin_v": 40, "margin_left": 60, "margin_right": 60},
+}
+
+
+def subtitle_margins(settings: Settings) -> tuple[int, int, int]:
+    """Return (bottom, left, right) margins; a platform preset wins over manual values."""
+    preset = SUBTITLE_PRESETS.get((settings.subtitle_preset or "").strip().lower())
+    if preset:
+        return preset["margin_v"], preset["margin_left"], preset["margin_right"]
+    return (
+        max(0, int(settings.subtitle_margin_v)),
+        max(0, int(settings.subtitle_margin_left)),
+        max(0, int(settings.subtitle_margin_right)),
+    )
 
 
 def _clean(text: str) -> str:
-    text = re.sub(r"\s+", "", text or "")
-    return text.strip()
+    """Collapse whitespace; drop it only for CJK-dominant text."""
+    text = re.sub(r"\s+", " ", text or "").strip()
+    if re.search(r"[\u4e00-\u9fff]", text):
+        return text.replace(" ", "")
+    return text
 
 
-def _split_text(text: str, max_chars: int) -> list[str]:
-    """Split Chinese text into subtitle-sized pieces, preferring punctuation."""
-    text = _clean(text)
-    if not text:
-        return []
-    pieces = re.split(r"(?<=[。！？；，、,.!?;])", text)
-    chunks: list[str] = []
-    current = ""
-    for piece in pieces:
-        if not piece:
-            continue
-        if len(current) + len(piece) <= max_chars:
-            current += piece
-        else:
-            if current:
-                chunks.append(current)
-            current = piece
-            while len(current) > max_chars:
-                chunks.append(current[:max_chars])
-                current = current[max_chars:]
-    if current:
-        chunks.append(current)
-    # Avoid a one-character orphan at the end of a cue.
+def _merge_orphans(chunks: list[str]) -> list[str]:
     cleaned: list[str] = []
     for chunk in chunks:
         chunk = chunk.strip()
@@ -52,6 +56,83 @@ def _split_text(text: str, max_chars: int) -> list[str]:
         elif chunk:
             cleaned.append(chunk)
     return cleaned
+
+
+def _split_words(text: str, max_chars: int) -> list[str]:
+    """Pack whitespace-separated text without breaking words."""
+    chunks: list[str] = []
+    current = ""
+    for word in text.split(" "):
+        if not word:
+            continue
+        candidate = f"{current} {word}" if current else word
+        if len(candidate) <= max_chars:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+        while len(word) > max_chars:
+            chunks.append(word[:max_chars])
+            word = word[max_chars:]
+        current = word
+    if current:
+        chunks.append(current)
+    return _merge_orphans(chunks)
+
+
+def _preferred_cut(text: str, max_chars: int) -> int:
+    """Prefer a punctuation or word boundary inside the character limit."""
+    window = text[:max_chars]
+    match = None
+    for match in PUNCT_BREAK_RE.finditer(window):
+        pass
+    if match is not None and match.end() > max_chars // 2:
+        return match.end()
+    space = window.rfind(" ")
+    if space > max_chars // 2:
+        return space + 1
+    return max_chars
+
+
+def _split_text(text: str, max_chars: int) -> list[str]:
+    """Split text into subtitle-sized pieces, preferring punctuation and words."""
+    text = _clean(text)
+    if not text:
+        return []
+    max_chars = max(1, int(max_chars))
+    if " " in text:
+        return _split_words(text, max_chars)
+    pieces = re.split(r"(?<=[。！？；，、,.!?;])", text)
+    chunks: list[str] = []
+    current = ""
+    for piece in pieces:
+        if not piece:
+            continue
+        if len(current) + len(piece) <= max_chars:
+            current += piece
+            continue
+        if current:
+            chunks.append(current)
+            current = ""
+        while len(piece) > max_chars:
+            cut = _preferred_cut(piece, max_chars)
+            chunks.append(piece[:cut])
+            piece = piece[cut:]
+        current = piece
+    if current:
+        chunks.append(current)
+    return _merge_orphans(chunks)
+
+
+def _piece_weight(piece: str) -> float:
+    """Approximate pause length from the trailing punctuation."""
+    text = piece.replace("\n", "").strip()
+    weight = float(max(1, len(text)))
+    if text and text[-1] in ENDING_PUNCT:
+        weight += 2.0
+    elif text and text[-1] in CLAUSE_PUNCT:
+        weight += 0.8
+    return weight
 
 
 def _cue_texts(text: str, max_chars: int, max_lines: int) -> list[str]:
@@ -85,10 +166,11 @@ def cues_from_timeline(
         pieces = _cue_texts(segment.text, max_chars, max_lines)
         if not pieces:
             continue
-        total_chars = sum(len(piece) for piece in pieces) or 1
+        weights = [_piece_weight(piece) for piece in pieces]
+        total_weight = sum(weights) or 1.0
         cursor = window_start
-        for piece in pieces:
-            share = len(piece) / total_chars
+        for piece, weight in zip(pieces, weights):
+            share = weight / total_weight
             length = max(0.8, min(max_seconds, (window_end - window_start) * share))
             end = min(window_end, cursor + length)
             if end - cursor < 0.35:
@@ -118,10 +200,11 @@ def cues_from_asr(
         pieces = _cue_texts(text, max_chars, max_lines)
         if not pieces:
             continue
-        total_chars = sum(len(piece) for piece in pieces) or 1
+        weights = [_piece_weight(piece) for piece in pieces]
+        total_weight = sum(weights) or 1.0
         cursor = start
-        for piece in pieces:
-            share = len(piece) / total_chars
+        for piece, weight in zip(pieces, weights):
+            share = weight / total_weight
             length = max(0.6, min(max_seconds, duration * share))
             piece_end = min(end, cursor + length)
             if piece_end - cursor < 0.3:
@@ -222,9 +305,7 @@ def write_ass(
     width = max(2, int(width))
     height = max(2, int(height))
     size = max(1, int(settings.subtitle_size))
-    margin_l = max(0, int(settings.subtitle_margin_left))
-    margin_r = max(0, int(settings.subtitle_margin_right))
-    margin_v = max(0, int(settings.subtitle_margin_v))
+    margin_v, margin_l, margin_r = subtitle_margins(settings)
     font = (settings.subtitle_font or "Sans").replace(",", " ")
     outline = max(1.0, round(height / 288.0, 1))
     header = [

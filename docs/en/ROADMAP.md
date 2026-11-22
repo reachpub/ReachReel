@@ -43,6 +43,11 @@ Validated on two real clips:
 - **P0-1 rotation metadata (done)**: display vs coded dimensions and rotation tests.
 - **P0-3 retries and quality flags (done)**: VLM/LLM/TTS/Whisper retry or fall back; degradations land in `manifest.quality_flags`.
 - **P0-8 BGM metadata (done)**: `inputs/bgm/manifest.json`, `manifest.bgm_metadata`, and `reachreel licenses`.
+- **P0-4 subtitle safe areas (done)**: platform presets, punctuation/word-aware splitting, pause-weighted timing, hard line limits.
+- **P0-7 cross-workdir cache (done)**: video-fingerprint VLM cache, content-keyed TTS audio, `cache info` / `cache clean`.
+- **P0-9 macOS slice (done)**: UTF-8 subprocesses, `platformdirs` cache, `doctor --json`, and a Chinese/space-path integration smoke.
+- **P1-3 review gate (done)**: `--review-script` writes `script.md` and stops before TTS.
+- **P1-4 audio (done)**: two-pass `loudnorm` with single-pass fallback and BGM fade-out.
 - Rotation/portrait display resolution fix.
 - `render` reuses `manifest.render_settings`.
 
@@ -87,17 +92,15 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 
 **Acceptance**: when the network is down / Ollama is dead / a model is missing, the error directly points to "which step, which file, how to fix it". Passed.
 
-### P0-4 Subtitle safe area and line breaking
+### P0-4 Subtitle safe area and line breaking (done)
 
-- Done: pixel-based font size/margins, ASS burned-in subtitles with `PlayRes` matching the output, subtitle pixel overflow QA; dropped characters on line wrap fixed.
-- Current: subtitle splitting prefers punctuation; timing is still distributed by character count, which can split the time of half a sentence.
-- TODO:
-  - portrait/landscape platform safe-area presets (Douyin/Reels/Shorts);
-  - line-break timing that better matches speech pauses;
-  - hard constraints: at most 2 lines per cue and at most N characters per line;
-  - migration hint for subtitle styles in old work directories.
+- `subtitle_preset` supports `douyin` / `reels` / `shorts` / `landscape`; a preset overrides the manual margins in both ASS output and QA.
+- CJK splitting prefers punctuation; whitespace languages pack whole words instead of breaking mid-word.
+- Cue duration is weighted by character count plus a pause bonus after sentence/clause punctuation.
+- `subtitle_max_chars` and `subtitle_max_lines` are hard limits.
+- Old-workdir subtitle style migration is documented in CONFIGURATION.
 
-**Acceptance**: 20 randomly sampled cues with no dropped characters, no overflow, and no half-sentence breaks.
+**Acceptance**: 20 randomly sampled cues with no dropped characters, no overflow, and no half-sentence breaks. Covered by unit tests and the integration smoke.
 
 ### P0-5 QA gate (done)
 
@@ -132,14 +135,13 @@ Implemented:
 
 **Acceptance**: PRs must pass lint + tests; core paths have regression tests.
 
-### P0-7 Cache keys and cross-workdir reuse
+### P0-7 Cache keys and cross-workdir reuse (done)
 
-- currently VLM/TTS caches are stored locally per `workdir`;
-- TODO:
-  - use video content hash + model + prompt version as the global cache key;
-  - optional `~/.cache/reachreel/`;
-  - the same footage can be reused across project directories;
-  - a cache cleanup command.
+- VLM results are keyed by a sampled video fingerprint plus model, prompt version, language, frame width, and brief.
+- TTS audio is keyed by engine, model, voice, speed, and text.
+- The optional shared root defaults to the platform cache dir; `cache_dir` overrides it.
+- Workdir caches remain the primary visible artifacts, and the shared cache is merged into them.
+- `reachreel cache info` and `cache clean --yes` inspect and remove the shared cache.
 
 ### P0-8 BGM metadata (done)
 
@@ -147,18 +149,26 @@ Implemented:
 - `mix` copies the matching entry into `manifest.json` as `bgm_metadata`.
 - `reachreel licenses <workdir>` writes `licenses.md` for publishing review.
 
-### P0-9 Cross-platform correctness (must be done before the panel)
+### P0-9 Cross-platform correctness (macOS slice done; Windows pending)
 
 See [DESKTOP_ARCHITECTURE.md §9](DESKTOP_ARCHITECTURE.md).
 
-- add `encoding="utf-8"` to `util.run` subprocesses (Windows Chinese paths raise `UnicodeDecodeError`);
-- switch paths to `platformdirs` and remove the CWD dependency (`output/` inside a `.app` / `.exe` will inevitably fail);
-- split extras (`accel-mlx` / `cpu` / `gui`) and drop the unused `torch` (580 MB);
-- ship a subsetted Chinese font + `fontsdir` with the package so subtitle rendering is consistent on all three platforms and QA does not produce false positives;
-- prefer the "app-bundled" binary when probing for FFmpeg;
-- `doctor --json` for the panel to render the availability matrix.
+Done on macOS:
 
-**Acceptance**: non-ASCII filenames and paths containing spaces can run through to `final.mp4` on all three platforms.
+- `util.run` subprocesses use UTF-8 with replacement;
+- the shared cache uses `platformdirs` (`~/Library/Caches/reachreel`) with a legacy-directory fallback;
+- `doctor --json` exposes the availability matrix;
+- the integration smoke runs from a Chinese/space path and burns subtitles.
+
+Remaining for Windows/desktop:
+
+- resolve `work_root` without relying on the CWD (`.app` / `.exe`);
+- split extras (`accel-mlx` / `cpu` / `gui`);
+- ship a subsetted Chinese font + `fontsdir`;
+- prefer the app-bundled FFmpeg binary;
+- replace MLX TTS/ASR with cross-platform engines (P2-1).
+
+**Acceptance**: non-ASCII filenames and paths containing spaces can run through to `final.mp4` on all three platforms. macOS passes today; Windows waits for P2-1.
 
 ### P0-10 Code language and string externalization (must be done before the panel)
 
@@ -200,24 +210,26 @@ See [LOCALIZATION.md §4](LOCALIZATION.md) (split table / migration steps / bann
 
 ### P1-3 Script quality
 
+- Done: human review gate (`--review-script` writes `script.md` and stops before voiceover);
 - fact constraints: every sentence must be traceable to VLM evidence from a `scene_id`;
 - proper-noun whitelist (from `brief`);
 - style presets: Vlog / documentary / commentary / healing / suspense;
 - first-3-second hook;
 - paragraph duration budget: derive character counts from actual TTS duration instead of only the target character count;
-- human review gate: output `script.md` first, then synthesize the voiceover after approval.
+- first-3-second hook quality metrics.
 
 ### P1-4 Audio quality
 
-- two-pass `loudnorm` (measure first, then linear normalization) to reduce dynamic compression;
+- Done: two-pass `loudnorm` (measure first, then linear normalization) with a single-pass fallback;
+- Done: BGM fade-out over `bgm_fade_seconds`;
 - BGM structure-aware ducking (different depth for intro/chorus);
 - ambient denoising/wind noise removal;
 - Demucs separation of vocals/ambient audio to avoid the original speech clashing with the narration;
-- BGM fade-out at the end;
 - optional "keep ambient audio only, drop the original speech".
 
 ### P1-5 Subtitle upgrade
 
+- Done: portrait/landscape safe-area presets (`subtitle_preset`);
 - per-character/per-word highlighting (karaoke);
 - bilingual subtitles;
 - subtitle templates: bottom bar, top title, name tags;
@@ -308,7 +320,7 @@ These would significantly increase complexity with little current payoff:
 
 ## Suggested version milestones
 
-### v0.2 — Shippable
+### v0.2 — Shippable (released as 0.2.0)
 
 - P0-1 through P0-4;
 - stage commands;

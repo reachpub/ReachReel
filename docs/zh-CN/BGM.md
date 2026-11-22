@@ -69,6 +69,10 @@ reachreel run video.mp4 --bgm inputs/bgm/calm-morning.mp3
 
 `mix` 会把匹配的记录写进 `manifest.json` 的 `bgm_metadata`，`reachreel licenses <workdir>` 再把它渲染成 `licenses.md`。
 
+## 结尾淡出
+
+BGM 在侧链闪避之前按 `bgm_fade_seconds`（默认 2 秒）淡出。配置里设为 `0`，或命令行 `--bgm-fade 0` 可关闭。
+
 ## 授权
 
 请使用 CC0 或明确允许商用的曲目，并在发布前逐首确认授权。没有做过独立授权审查前，不要在本仓库重新分发第三方曲目。

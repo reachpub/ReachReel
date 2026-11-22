@@ -194,6 +194,7 @@ def analyze_scenes(
     model: str,
     workers: int = 2,
     cache_path: Path | None = None,
+    shared_cache_path: Path | None = None,
     max_width: int = 768,
     force: bool = False,
     context: str = "",
@@ -204,6 +205,11 @@ def analyze_scenes(
     if cache.get("settings") != settings_key:
         cache = {"settings": settings_key, "scenes": {}}
     scene_cache: dict[str, Any] = cache.setdefault("scenes", {})
+    if shared_cache_path is not None and not force:
+        shared = read_json(shared_cache_path, {}) or {}
+        if shared.get("settings") == settings_key:
+            for key, value in (shared.get("scenes") or {}).items():
+                scene_cache.setdefault(key, value)
 
     client = OllamaClient(base_url, model)
     pending = []
@@ -218,6 +224,8 @@ def analyze_scenes(
         LOG.info("VLM analysis cache hit (%d scenes)", len(scenes))
         if cache_path:
             atomic_write_json(cache_path, cache)
+        if shared_cache_path is not None:
+            _write_shared(shared_cache_path, settings_key, scene_cache)
         return _collect_quality(scenes, scene_cache)
 
     LOG.info("Analyzing %d scenes with the local VLM (%s)...", len(pending), model)
@@ -273,7 +281,17 @@ def analyze_scenes(
 
     if cache_path:
         atomic_write_json(cache_path, cache)
+    if shared_cache_path is not None:
+        _write_shared(shared_cache_path, settings_key, scene_cache)
     return _collect_quality(scenes, scene_cache)
+
+
+def _write_shared(path: Path, settings_key: str, scene_cache: dict[str, Any]) -> None:
+    shared = read_json(path, {}) or {}
+    if shared.get("settings") != settings_key:
+        shared = {"settings": settings_key, "scenes": {}}
+    shared.setdefault("scenes", {}).update(scene_cache)
+    atomic_write_json(path, shared)
 
 
 def _collect_quality(scenes: list[Scene], scene_cache: dict[str, Any]) -> list[QualityFlag]:

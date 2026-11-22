@@ -23,6 +23,7 @@ from ..core.util import (
 )
 from ..domain.models import QualityFlag, merge_quality_flags
 from ..i18n import t
+from ..media.subtitles import SUBTITLE_PRESETS
 
 PASS = "pass"
 WARN = "warn"
@@ -435,11 +436,20 @@ def subtitle_margin_status(
     thresholds: QAThresholds,
 ) -> tuple[str, dict[str, Any]]:
     """Compare measured text bounds with the configured subtitle safe margins."""
-    limits = {
-        "left": int(settings.get("subtitle_margin_left", 50)),
-        "right": int(settings.get("subtitle_margin_right", 50)),
-        "bottom": int(settings.get("subtitle_margin_v", 36)),
-    }
+    preset_name = str(settings.get("subtitle_preset") or "").strip().lower()
+    preset = SUBTITLE_PRESETS.get(preset_name)
+    if preset:
+        limits = {
+            "left": int(preset["margin_left"]),
+            "right": int(preset["margin_right"]),
+            "bottom": int(preset["margin_v"]),
+        }
+    else:
+        limits = {
+            "left": int(settings.get("subtitle_margin_left", 50)),
+            "right": int(settings.get("subtitle_margin_right", 50)),
+            "bottom": int(settings.get("subtitle_margin_v", 36)),
+        }
     actual = {
         "left": bounds["left"],
         "right": width - bounds["right"],
@@ -461,13 +471,14 @@ def subtitle_margin_status(
         "margins": actual,
         "limits": limits,
         "violations": violations,
+        "preset": preset_name or None,
         "frame": {"width": width, "height": height},
     }
     return status, details
 
 
 def _normalize_text(text: str) -> str:
-    return PUNCT_RE.sub("", text or "")
+    return re.sub(r"\s+", "", PUNCT_RE.sub("", text or ""))
 
 
 def compare_narration_subtitles(

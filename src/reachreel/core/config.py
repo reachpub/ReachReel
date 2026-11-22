@@ -62,6 +62,7 @@ class Settings:
     subtitle_max_seconds: float = 6.0
     subtitle_font: str = "PingFang SC"
     subtitle_size: int = 48  # output pixels (ASS PlayRes = output resolution)
+    subtitle_preset: str = ""  # "" | douyin | reels | shorts | landscape
     subtitle_margin_v: int = 36
     subtitle_margin_left: int = 50
     subtitle_margin_right: int = 50
@@ -75,6 +76,8 @@ class Settings:
     ambient_duck_db: float = -10.0
     target_lufs: float = -14.0
     true_peak: float = -1.5
+    two_pass_loudnorm: bool = True
+    bgm_fade_seconds: float = 2.0
 
     # Render
     output_height: int = 0  # 0 = keep source height
@@ -113,6 +116,10 @@ class Settings:
     qa_narration_subtitle_fail_ratio: float = 0.5
     qa_skip_subtitle_pixels: bool = False
 
+    # Cache
+    cache_enabled: bool = True
+    cache_dir: str = ""  # empty = platform cache dir (macOS: ~/Library/Caches/reachreel)
+
     # Paths
     work_root: str = "output"
     bgm_root_resolved: Path | None = field(default=None, repr=False)
@@ -147,6 +154,7 @@ class Settings:
                 setattr(settings, key, value)
         settings.ui_language = normalize_language(settings.ui_language)
         settings.content_language = normalize_content_language(settings.content_language)
+        settings.subtitle_preset = normalize_subtitle_preset(settings.subtitle_preset)
         settings.bgm_root_resolved = Path(settings.bgm_dir).expanduser()
         return settings
 
@@ -161,14 +169,27 @@ class Settings:
             "REACHREEL_BGM_DIR": "bgm_dir",
             "REACHREEL_WHISPER_MODEL": "whisper_model",
             "REACHREEL_TTS_ENGINE": "tts_engine",
+            "REACHREEL_CACHE_DIR": "cache_dir",
         }
         for env_name, attr in mapping.items():
             value = os.environ.get(env_name)
             if value:
                 setattr(self, attr, value)
+        cache_flag = os.environ.get("REACHREEL_CACHE")
+        if cache_flag and cache_flag.strip().lower() in {"0", "false", "no", "off"}:
+            self.cache_enabled = False
 
     def resolved_bgm_dir(self) -> Path:
         return Path(self.bgm_dir).expanduser()
+
+
+SUBTITLE_PRESETS = ("", "douyin", "reels", "shorts", "landscape")
+
+
+def normalize_subtitle_preset(value: str | None) -> str:
+    """Normalize a platform preset name; unknown values fall back to manual margins."""
+    preset = str(value or "").strip().lower()
+    return preset if preset in SUBTITLE_PRESETS else ""
 
 
 def settings_to_dict(settings: Settings) -> dict[str, Any]:
