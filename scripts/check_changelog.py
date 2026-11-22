@@ -96,7 +96,7 @@ def parse(path: Path, language: str) -> dict[str, object]:
     }
 
 
-def compare(en_path: Path, zh_path: Path) -> list[str]:
+def compare(en_path: Path, zh_path: Path, *, strict: bool = False) -> list[str]:
     english = parse(en_path, "en")
     chinese = parse(zh_path, "zh")
     problems: list[str] = []
@@ -136,7 +136,14 @@ def compare(en_path: Path, zh_path: Path) -> list[str]:
             continue
         for section, en_count in en_sections.items():
             zh_count = zh_sections[section]
-            if en_count != zh_count:
+            if en_count and not zh_count:
+                problems.append(
+                    f"{title} / {section}: {en_count} bullet(s) in {en_path.name} "
+                    f"but none in {zh_path.name}"
+                )
+            elif strict and en_count != zh_count:
+                # A long English bullet may become two Chinese ones and vice
+                # versa, so the counts only gate releases (--strict).
                 problems.append(
                     f"{title} / {section}: {en_count} bullet(s) in {en_path.name} "
                     f"but {zh_count} in {zh_path.name}"
@@ -147,6 +154,11 @@ def compare(en_path: Path, zh_path: Path) -> list[str]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="also require the same bullet count per section (release check)",
+    )
     args = parser.parse_args(argv)
 
     en_path = args.root / "CHANGELOG.md"
@@ -156,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"missing changelog: {path}", file=sys.stderr)
             return 1
 
-    problems = compare(en_path, zh_path)
+    problems = compare(en_path, zh_path, strict=args.strict)
     if problems:
         print("CHANGELOG.md and CHANGELOG.zh-CN.md are out of sync:", file=sys.stderr)
         for problem in problems:

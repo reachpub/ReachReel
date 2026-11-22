@@ -37,8 +37,30 @@ HEADER_RE = re.compile(
     r"^(?P<type>[a-z]+)(?:\((?P<scope>[^()\s]+)\))?(?P<breaking>!)?: (?P<subject>\S.*)$"
 )
 CJK_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+# Quoted identifiers, config values and code fences may contain the language
+# they describe; masking them keeps "documented `新增` heading" legal without
+# allowing a Chinese commit message.
+FENCE_PREFIXES = ("```", "~~~")
+INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
 
 EXAMPLE = "feat(media): add scene-aware frame selection"
+
+
+def _mask_code_blocks(lines: list[str]) -> list[str]:
+    """Blank out code fences and inline code so CJK inside them is ignored."""
+    masked: list[str] = []
+    in_fence = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(FENCE_PREFIXES):
+            in_fence = not in_fence
+            masked.append("")
+            continue
+        if in_fence:
+            masked.append("")
+            continue
+        masked.append(INLINE_CODE_RE.sub(lambda match: " " * len(match.group(0)), line))
+    return masked
 
 
 def validate(message: str) -> list[str]:
@@ -73,10 +95,16 @@ def validate(message: str) -> list[str]:
         if len(lines) > 1 and lines[1].strip():
             problems.append("leave the second line empty before the body")
 
-    cjk = [f"  line {index}: {line}" for index, line in enumerate(lines, 1) if CJK_RE.search(line)]
+    masked = _mask_code_blocks(lines)
+    cjk = [
+        f"  line {index}: {line}"
+        for index, line in enumerate(masked, 1)
+        if CJK_RE.search(line)
+    ]
     if cjk:
         problems.append(
-            "commit messages must be English; CJK characters found:\n" + "\n".join(cjk)
+            "commit messages must be English (quote other scripts in backticks); "
+            "CJK characters found:\n" + "\n".join(cjk)
         )
     return problems
 

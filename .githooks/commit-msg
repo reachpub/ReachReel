@@ -1,4 +1,11 @@
 #!/bin/sh
 # Reject commit messages that break the Conventional Commits rule in AGENTS.md.
 # Enable once per clone: git config core.hooksPath .githooks
+#
+# Never block a commit because the tooling itself is missing: a contributor
+# without python3 still gets their commit through, with a warning.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "reachreel: python3 not found, skipping the commit message check" >&2
+  exit 0
+fi
 exec python3 "$(git rev-parse --show-toplevel)/scripts/check_commit_messages.py" --file "$1"

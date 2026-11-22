@@ -46,6 +46,15 @@ class CommitMessageTests(unittest.TestCase):
         problems = validate("feat(subtitle): 白字黑描边")
         self.assertTrue(any("English" in problem for problem in problems))
 
+    def test_allows_cjk_inside_backticks_and_fences(self):
+        # Quoting the language a doc is about is not a Chinese commit message.
+        self.assertEqual(validate("docs: document the `新增` heading"), [])
+        self.assertEqual(validate("docs: explain `新增` and `修复`"), [])
+        self.assertEqual(validate("docs: example\n\n```\n新增\n```\n"), [])
+        # ... but the subject itself must stay English.
+        problems = validate("docs: 记录新增标题")
+        self.assertTrue(problems)
+
     def test_accepts_git_generated_subjects(self):
         self.assertEqual(validate("Merge branch 'main' into feature"), [])
         self.assertEqual(validate('Revert "feat(subtitle): white text"'), [])
@@ -62,7 +71,10 @@ class CommitMessageTests(unittest.TestCase):
         hook = PROJECT_ROOT / ".githooks" / "commit-msg"
         self.assertTrue(hook.is_file())
         self.assertTrue(os.access(hook, os.X_OK), "the commit-msg hook must be executable")
-        self.assertIn("check_commit_messages.py", hook.read_text(encoding="utf-8"))
+        text = hook.read_text(encoding="utf-8")
+        self.assertIn("check_commit_messages.py", text)
+        # A contributor without python3 must not be blocked by the hook.
+        self.assertIn("command -v python3", text)
 
     def test_cli_reports_failures(self):
         from scripts.check_commit_messages import main

@@ -66,10 +66,21 @@ class ChangelogSyncTests(unittest.TestCase):
             [("[Unreleased]", {"added": 2}), ("[0.2.0] - 2026-01-01", {"fixed": 1})],
         )
 
-    def test_bullet_count_mismatch_is_reported(self):
+    def test_bullet_count_mismatch_is_advisory(self):
+        # A long English bullet may become two Chinese ones, so a count drift
+        # must not block a normal commit: it only fails with --strict.
         en_path, zh_path = self._pair(chinese=ZH.replace("- 二\n", ""))
+        self.assertEqual(compare(en_path, zh_path), [])
+        strict = compare(en_path, zh_path, strict=True)
+        self.assertTrue(any("added" in problem and "bullet" in problem for problem in strict))
+        self.assertEqual(main(["--root", str(en_path.parent)]), 0)
+        self.assertEqual(main(["--root", str(en_path.parent), "--strict"]), 1)
+
+    def test_section_empty_in_one_language_still_fails(self):
+        emptied = ZH.replace("- 一\n- 二\n", "")
+        en_path, zh_path = self._pair(chinese=emptied)
         problems = compare(en_path, zh_path)
-        self.assertTrue(any("added" in problem and "bullet" in problem for problem in problems))
+        self.assertTrue(any("but none" in problem for problem in problems))
 
     def test_missing_version_in_one_file(self):
         zh_path_missing = ZH.split("## [0.2.0]")[0]

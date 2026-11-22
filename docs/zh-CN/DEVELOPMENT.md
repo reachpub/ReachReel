@@ -95,6 +95,7 @@ qa
 | `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits 校验器，git hook 与 CI 共用 | `validate`, `messages_in_range` |
+| `scripts/check_python_language.py` | 拒绝 Python 源码里的 CJK（不扫描 locales/prompts） | `find_offenders` |
 | `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` 结构一致性 | `parse`, `compare`, `main` |
 
 ---
@@ -677,16 +678,34 @@ refactor(core)!: drop python 3.10
 
 `tests/unit/test_commit_messages.py` 覆盖校验器，其中一条断言 hook 保持可执行权限。
 
+为了不挡日常开发，留了这些出口：
+
+- 反引号与代码块里的 CJK 放行，因为「引用所描述的语言」不等于中文提交信息：`docs: document the `新增` heading` 可以通过；
+- `Merge`、`Revert "`、`fixup!`、`squash!`、`amend!` 这类 Git 生成主题直接放行；
+- 机器上没有 `python3` 时，hook 只打印警告并放行；
+- `git commit --no-verify` 仍可跳过所有本地 hook，CI 也只检查本次 push 或 PR 新增的提交。
+
 ### 变更记录一致性
 
-`scripts/check_changelog.py` 在 CI 中运行，零依赖对比 `CHANGELOG.md` 与 `CHANGELOG.zh-CN.md`：
+`scripts/check_changelog.py` 在 CI 中运行，零依赖对比 `CHANGELOG.md` 与 `CHANGELOG.zh-CN.md`。结构问题直接失败，每章节条目数只做提示：
 
 - 两个文件都保留指向另一语言版本的语言横幅；
 - 版本标题（`## [Unreleased]`、`## [x.y.z] - date`）一致且顺序相同；
 - 每个版本的章节一致且顺序相同，且英文文件用英文标题、中文文件用中文标题（`Added` / `新增`、`Changed` / `变更`、`Fixed` / `修复`、`Validation` / `验证`、`Known limitations` / `已知限制` 等）；
-- 每个章节的条目数一致——这是漏翻最容易暴露的地方。
+- 某章节在一侧有条目、另一侧为空会失败；条目数不一致只打印警告，因为一条长英文条目合理地可以拆成两条中文。`--strict` 会把条目数升级为错误，用于发布检查。
 
 新增章节标题需要在脚本的 `SECTIONS` 里登记，检查会打印违规标题与期望译名。`tests/unit/test_changelog_sync.py` 覆盖全部规则以及仓库里真实的这对文件。
+
+### 哪项检查在哪里跑
+
+`ci.yml` 拆成两个 job，让快速检查不占 macOS 分钟：
+
+| Job | Runner | 步骤 |
+|---|---|---|
+| `checks` | `ubuntu-latest` | 提交信息、变更记录一致性、Python 源码无 CJK |
+| `test` | `macos-15` × Python 3.11/3.12 | Ruff、单元测试、`uv build`（仅 3.12） |
+
+`checks` 不需要虚拟环境，几秒结束；提交信息写错会在 macOS runner 分配之前就失败。`tests/integration` 不进 CI，本地用 `REACHREEL_INTEGRATION=1` 跑。
 
 ### 合成测试素材
 

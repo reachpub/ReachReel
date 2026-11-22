@@ -9,6 +9,7 @@ from reachreel.domain.models import Scene
 from reachreel.generation.script import _scene_table
 from reachreel.i18n import set_language, t
 from reachreel.prompts import load_content, load_prompt
+from scripts.check_python_language import find_offenders
 
 
 def _flatten(data: dict, prefix: str = "") -> set[str]:
@@ -58,18 +59,13 @@ class I18nPromptTests(unittest.TestCase):
         self.assertEqual(set(load_content("en")), set(load_content("zh")))
 
     def test_no_cjk_in_python_source(self):
+        # Same implementation as the CI step: scripts/check_python_language.py.
         root = Path(__file__).resolve().parents[2] / "src" / "reachreel"
-        cjk = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
-        offenders: list[str] = []
-        for path in sorted(root.rglob("*.py")):
-            for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                if cjk.search(line):
-                    offenders.append(f"{path.relative_to(root.parent.parent)}:{lineno}: {line.strip()}")
         self.assertEqual(
-            offenders,
+            find_offenders(root),
             [],
-            "CJK in Python source; keep localized text in locales/*.toml or prompts/*.toml:\n"
-            + "\n".join(offenders),
+            "CJK in Python source; keep localized text in locales/*.toml "
+            "or prompts/*.toml (run: python3 scripts/check_python_language.py)",
         )
 
     def test_english_scene_table_uses_english_labels(self):

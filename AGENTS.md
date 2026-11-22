@@ -66,6 +66,11 @@ uv pip install --python .venv/bin/python -e .
 uvx ruff check src/reachreel tests scripts
 .venv/bin/python -m unittest discover -s tests -v
 
+# Repo conventions (same scripts CI runs)
+python3 scripts/check_commit_messages.py --range origin/main..HEAD
+python3 scripts/check_changelog.py
+python3 scripts/check_python_language.py
+
 # Commit-message hook (once per clone)
 git config core.hooksPath .githooks
 
@@ -141,5 +146,5 @@ The installed command is `reachreel`.
   - `feat(media): add scene-aware frame selection`
   - `docs(i18n): add English user guide`
   - `chore(ci): run ruff and unit tests`
-- Changelog parity is enforced by `scripts/check_changelog.py` in CI: same version headings, same sections (English file in English, Chinese file in Chinese), and the same number of bullets per section.
+- Changelog parity is enforced by `scripts/check_changelog.py` in CI: same version headings, same sections (English file in English, Chinese file in Chinese); a section that is empty in one language fails, and a bullet-count drift is only a warning unless `--strict` is passed.
 - The format is enforced by `scripts/check_commit_messages.py`: locally through `.githooks/commit-msg` and in CI over the commits a push or pull request adds. Header is `type(scope): subject` (scope optional, `!` for a breaking change), at most 72 characters, no trailing period, English only.

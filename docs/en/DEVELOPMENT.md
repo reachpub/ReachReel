@@ -95,6 +95,7 @@ qa
 | `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits validator shared by the git hook and CI | `validate`, `messages_in_range` |
+| `scripts/check_python_language.py` | Rejects CJK in Python sources (locales/prompts are not scanned) | `find_offenders` |
 | `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` structural parity | `parse`, `compare`, `main` |
 
 ---
@@ -677,16 +678,34 @@ The header is `type(scope): subject` (`scope` optional, `!` marks a breaking cha
 
 `tests/unit/test_commit_messages.py` covers the validator, including that the hook stays executable.
 
+Escape hatches, so the rule never blocks ordinary work:
+
+- CJK is allowed inside backticks and fenced blocks, because quoting the language a document is about is not a Chinese commit message: `docs: document the `新增` heading` passes;
+- `Merge`, `Revert "`, `fixup!`, `squash!`, `amend!` subjects are accepted as generated;
+- when `python3` is missing the hook prints a warning and lets the commit through;
+- `git commit --no-verify` still skips every local hook, and CI only inspects the commits a push or pull request adds.
+
 ### Changelog parity
 
-`scripts/check_changelog.py` runs in CI and compares `CHANGELOG.md` with `CHANGELOG.zh-CN.md` without any dependency:
+`scripts/check_changelog.py` runs in CI and compares `CHANGELOG.md` with `CHANGELOG.zh-CN.md` without any dependency. Structure is a hard failure, per-section bullet counts are advisory:
 
 - both files keep a banner linking to the other language version;
 - the version headings (`## [Unreleased]`, `## [x.y.z] - date`) match and are in the same order;
 - each version has the same sections in the same order, and the English file uses the English heading while the Chinese file uses the Chinese one (`Added` / `新增`, `Changed` / `变更`, `Fixed` / `修复`, `Validation` / `验证`, `Known limitations` / `已知限制`, ...);
-- each section has the same number of bullets, which is what catches a forgotten translation.
+- a section that has bullets in one language and none in the other fails; a count mismatch only prints a warning, because one long English bullet legitimately becomes two Chinese ones. `--strict` turns the counts into errors for a release check.
 
 A new section heading must be registered in `SECTIONS` inside the script; the check prints the exact heading and the expected translation. `tests/unit/test_changelog_sync.py` covers every rule plus the real repository pair.
+
+### Which check runs where
+
+`ci.yml` has two jobs so the fast checks never compete with macOS minutes:
+
+| Job | Runner | Steps |
+|---|---|---|
+| `checks` | `ubuntu-latest` | commit messages, changelog parity, Python sources are English |
+| `test` | `macos-15` × Python 3.11/3.12 | Ruff, unit tests, `uv build` (3.12 only) |
+
+The `checks` job needs no virtualenv and finishes in seconds, so a bad commit subject fails before a macOS runner is even allocated. `tests/integration` is never part of CI; run it with `REACHREEL_INTEGRATION=1`.
 
 ### Synthetic test footage
 
