@@ -1,4 +1,6 @@
 import re
+import shutil
+import subprocess
 import tomllib
 import unittest
 from importlib import resources
@@ -9,7 +11,6 @@ from reachreel.domain.models import Scene
 from reachreel.generation.script import _scene_table
 from reachreel.i18n import set_language, t
 from reachreel.prompts import load_content, load_prompt
-from scripts.check_python_language import find_offenders
 
 
 def _flatten(data: dict, prefix: str = "") -> set[str]:
@@ -59,13 +60,26 @@ class I18nPromptTests(unittest.TestCase):
         self.assertEqual(set(load_content("en")), set(load_content("zh")))
 
     def test_no_cjk_in_python_source(self):
-        # Same implementation as the CI step: scripts/check_python_language.py.
-        root = Path(__file__).resolve().parents[2] / "src" / "reachreel"
+        # Same command CI runs; skipped when the dev extra is not installed,
+        # since the unit-test job installs no dev dependencies.
+        apdev = shutil.which("apdev")
+        if apdev is None:
+            self.skipTest("apdev is not installed (pip install -e '.[dev]')")
+        root = Path(__file__).resolve().parents[2]
+        sources = sorted(str(path) for path in (root / "src/reachreel").rglob("*.py"))
+        proc = subprocess.run(
+            [apdev, "check-chars", "--charset-file", str(root / "scripts/apdev_charset.json"), *sources],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
         self.assertEqual(
-            find_offenders(root),
-            [],
-            "CJK in Python source; keep localized text in locales/*.toml "
-            "or prompts/*.toml (run: python3 scripts/check_python_language.py)",
+            proc.returncode,
+            0,
+            "Chinese ideographs in Python source; keep localized text in "
+            "locales/*.toml or prompts/*.toml: " + (proc.stderr or proc.stdout).strip()[:500],
         )
 
     def test_english_scene_table_uses_english_labels(self):

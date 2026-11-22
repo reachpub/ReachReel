@@ -95,7 +95,7 @@ qa
 | `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits validator shared by the git hook and CI | `validate`, `messages_in_range` |
-| `scripts/check_python_language.py` | Rejects CJK in Python sources (locales/prompts are not scanned) | `find_offenders` |
+| `scripts/apdev_charset.json` | Charset for `apdev check-chars`: ASCII + emoji + CJK punctuation, Chinese ideographs illegal | — |
 | `scripts/check_config_docs.py` | Configuration surface: `Settings` ↔ `config.example.toml` ↔ both `CONFIGURATION.md` | `settings_fields`, `compare` |
 | `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` structural parity | `parse`, `compare`, `main` |
 
@@ -660,6 +660,29 @@ git config core.hooksPath .githooks   # enables the commit-msg hook
 
 Development requires macOS on Apple silicon. `reachreel doctor` reports a failing `Platform` check on Intel macOS, Linux, and Windows, because MLX ships no x86_64 macOS build.
 
+### Maintainer tooling (`.[dev]`)
+
+```bash
+uv pip install --python .venv/bin/python -e '.[dev]'
+apdev check-imports                                      # dependency direction stays acyclic
+apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel -name '*.py')
+```
+
+`apdev` is the shared APCore development toolkit (`apdev[dev]>=0.2.5`, configured through `[tool.apdev]` in `pyproject.toml`). Two things to know:
+
+- `check-chars` is ASCII + emoji + explicitly allowed ranges. `scripts/apdev_charset.json` adds the CJK punctuation blocks (`0x3000-0x303F`, `0xFF00-0xFFEF`) because the splitters use the full-width sentence marks as data, while Chinese ideographs stay illegal outside `locales/` and `prompts/`;
+- test fixtures legitimately contain Chinese, so only `src/reachreel/**/*.py` is checked. Run `apdev check-chars --charset chinese tests/` to scan them too.
+
+### Releases
+
+`[tool.apdev]` also feeds `apdev release`, which verifies that `pyproject.toml` and `reachreel.__version__` agree, builds with `python -m build`, runs `twine check`, and then offers the tag / GitHub-release / PyPI steps. Cut the version first, then hand over:
+
+1. move the `[Unreleased]` entries into a new `## [x.y.z] - YYYY-MM-DD` section in both changelogs;
+2. bump `version` in `pyproject.toml` and `__version__` in `src/reachreel/__init__.py`;
+3. `apdev release` (add `--yes` for the non-interactive path).
+
+Tags use a `v` prefix (`v0.3.0`).
+
 ### Commit messages
 
 Commits follow Conventional Commits in English, exactly as declared in `AGENTS.md`:
@@ -716,7 +739,7 @@ Running it for the first time found 18 `[qa]` thresholds that were in `Settings`
 
 | Job | Runner | Steps |
 |---|---|---|
-| `checks` | `ubuntu-latest` | commit messages, changelog parity, Python sources are English, configuration surface |
+| `checks` | `ubuntu-latest` | commit messages, changelog parity, `apdev check-chars` on Python sources, `apdev check-imports`, configuration surface |
 | `test` | `macos-15` × Python 3.11/3.12 | Ruff, unit tests, `uv build` (3.12 only) |
 
 The `checks` job needs no virtualenv and finishes in seconds, so a bad commit subject fails before a macOS runner is even allocated. `tests/integration` is never part of CI; run it with `REACHREEL_INTEGRATION=1`.

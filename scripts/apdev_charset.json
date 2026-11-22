@@ -1,0 +1,8 @@
+{
+  "name": "reachreel-source",
+  "description": "ASCII + emoji + CJK punctuation. Chinese ideographs stay illegal in Python sources; full-width punctuation is parsing data, not UI copy.",
+  "extra_ranges": [
+    { "start": "0x3000", "end": "0x303F", "name": "CJK Symbols and Punctuation" },
+    { "start": "0xFF00", "end": "0xFFEF", "name": "Fullwidth Forms (sentence punctuation used by the splitters)" }
+  ]
+}

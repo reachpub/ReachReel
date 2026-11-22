@@ -95,7 +95,7 @@ qa
 | `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits 校验器，git hook 与 CI 共用 | `validate`, `messages_in_range` |
-| `scripts/check_python_language.py` | 拒绝 Python 源码里的 CJK（不扫描 locales/prompts） | `find_offenders` |
+| `scripts/apdev_charset.json` | `apdev check-chars` 的字符集：ASCII + emoji + CJK 标点，汉字仍然非法 | — |
 | `scripts/check_config_docs.py` | 配置项三处一致：`Settings` ↔ `config.example.toml` ↔ 两份 `CONFIGURATION.md` | `settings_fields`, `compare` |
 | `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` 结构一致性 | `parse`, `compare`, `main` |
 
@@ -660,6 +660,29 @@ git config core.hooksPath .githooks   # 启用 commit-msg hook
 
 开发环境必须是 Apple Silicon 上的 macOS。`reachreel doctor` 在 Intel macOS、Linux、Windows 上会让 `平台` 这项失败，因为 MLX 没有 x86_64 macOS 构建。
 
+### 维护工具（`.[dev]`）
+
+```bash
+uv pip install --python .venv/bin/python -e '.[dev]'
+apdev check-imports                                      # 依赖方向保持无环
+apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel -name '*.py')
+```
+
+`apdev` 是 APCore 系列共用的开发工具包（`apdev[dev]>=0.2.5`，通过 `pyproject.toml` 的 `[tool.apdev]` 配置）。两点说明：
+
+- `check-chars` 默认只允许 ASCII + emoji + 白名单范围。`scripts/apdev_charset.json` 放行 CJK 标点区（`0x3000-0x303F`、`0xFF00-0xFFEF`），因为切分逻辑把全角句末标点当数据用；汉字在 `locales/` 与 `prompts/` 之外仍然非法；
+- 测试 fixture 本来就含中文，所以只检查 `src/reachreel/**/*.py`。想连测试一起扫时用 `apdev check-chars --charset chinese tests/`。
+
+### 发布
+
+`[tool.apdev]` 同时供 `apdev release` 使用：它会校验 `pyproject.toml` 与 `reachreel.__version__` 一致，用 `python -m build` 打包、跑 `twine check`，然后逐步提供打 tag / 建 GitHub release / 上传 PyPI。先收口版本，再交给它：
+
+1. 把 `[Unreleased]` 的内容搬进两份变更记录里新的 `## [x.y.z] - YYYY-MM-DD` 段；
+2. 更新 `pyproject.toml` 的 `version` 与 `src/reachreel/__init__.py` 的 `__version__`；
+3. `apdev release`（非交互时加 `--yes`）。
+
+tag 采用 `v` 前缀（`v0.3.0`）。
+
 ### 提交信息
 
 提交信息按 `AGENTS.md` 的约定使用英文 Conventional Commits：
@@ -716,7 +739,7 @@ refactor(core)!: drop python 3.10
 
 | Job | Runner | 步骤 |
 |---|---|---|
-| `checks` | `ubuntu-latest` | 提交信息、变更记录一致性、Python 源码无 CJK、配置项一致性 |
+| `checks` | `ubuntu-latest` | 提交信息、变更记录一致性、`apdev check-chars`（Python 源码）、`apdev check-imports`、配置项一致性 |
 | `test` | `macos-15` × Python 3.11/3.12 | Ruff、单元测试、`uv build`（仅 3.12） |
 
 `checks` 不需要虚拟环境，几秒结束；提交信息写错会在 macOS runner 分配之前就失败。`tests/integration` 不进 CI，本地用 `REACHREEL_INTEGRATION=1` 跑。

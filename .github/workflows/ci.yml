@@ -41,8 +41,19 @@ jobs:
         # Structure only; per-section bullet counts are a --strict release check.
         run: python3 scripts/check_changelog.py
 
+      - name: Install apdev
+        # Shared APCore tooling: source charset and circular-import checks.
+        run: uv tool install 'apdev==0.2.5'
+
       - name: Python sources are English
-        run: python3 scripts/check_python_language.py
+        # scripts/apdev_charset.json allows CJK punctuation (parsing data) but
+        # keeps Chinese ideographs illegal outside locales/ and prompts/.
+        run: >-
+          apdev check-chars --charset-file scripts/apdev_charset.json
+          $(find src/reachreel -name '*.py')
+
+      - name: No circular imports
+        run: apdev check-imports
 
       - name: Configuration surface
         # Settings <-> config.example.toml <-> both CONFIGURATION.md files.

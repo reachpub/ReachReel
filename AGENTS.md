@@ -61,15 +61,18 @@ cli -> pipeline -> {generation, engines, media, domain} -> core
 # Environment (Python 3.11-3.12; 3.12 is recommended)
 python3.12 -m venv .venv
 uv pip install --python .venv/bin/python -e .
+uv pip install --python .venv/bin/python -e '.[dev]'   # apdev + lint/test tooling
 
 # Quality gates
 uvx ruff check src/reachreel tests scripts
 .venv/bin/python -m unittest discover -s tests -v
 
-# Repo conventions (same scripts CI runs)
+# Repo conventions (same commands CI runs)
 python3 scripts/check_commit_messages.py --range origin/main..HEAD
 python3 scripts/check_changelog.py
-python3 scripts/check_python_language.py
+python3 scripts/check_config_docs.py
+apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel -name '*.py')
+apdev check-imports
 
 # Commit-message hook (once per clone)
 git config core.hooksPath .githooks
@@ -116,7 +119,8 @@ The installed command is `reachreel`.
 - User-visible messages should be rendered through `reachreel.i18n.t()` once the i18n layer lands.
 - Keep language-specific prompt text out of Python source. Prompt packs belong in `src/reachreel/prompts/<language>/`.
 - Do not merge UI language and content language into one setting.
-- CI must reject CJK characters in Python source outside `prompts/` and `locales/`.
+- CI must reject CJK characters in Python source outside `prompts/` and `locales/` (`apdev check-chars` with `scripts/apdev_charset.json`; full-width punctuation is allowed because it is parsing data).
+- Dependency direction must stay acyclic; `apdev check-imports` runs in CI.
 
 ## Documentation rules
 
