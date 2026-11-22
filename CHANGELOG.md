@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- PyPI-facing project metadata in `pyproject.toml`: `Project-URL` entries (homepage, repository, documentation, changelog, issues), eleven Trove classifiers, keywords, and the author. `twine check` passes for the wheel and the sdist, the licence renders through PEP 639 (`License-Expression: Apache-2.0` plus `License-File: LICENSE`/`NOTICE`), and the build emits Metadata-Version 2.5.
+
+### Fixed
+
+- The `dev` extra did not actually list `pre-commit`, although `.pre-commit-config.yaml` and the docs tell contributors that `uv pip install -e '.[dev]'` provides it. It is part of the extra again (`pre-commit>=3.5`).
+
 ## [0.3.0] - 2026-11-22
 
 ### Added

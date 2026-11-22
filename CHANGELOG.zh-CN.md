@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 新增
+
+- `pyproject.toml` 补齐 PyPI 页面所需元数据：`Project-URL`（主页、仓库、文档、变更记录、Issues）、11 条 Trove 分类、关键词与作者。`twine check` 对 wheel 与 sdist 均通过；许可证按 PEP 639 渲染（`License-Expression: Apache-2.0` 与 `License-File: LICENSE`/`NOTICE`），构建元数据版本为 2.5。
+
+### 修复
+
+- `dev` extra 里其实没有列 `pre-commit`，但 `.pre-commit-config.yaml` 和文档都告诉贡献者 `uv pip install -e '.[dev]'` 会带上它。现已重新加入（`pre-commit>=3.5`）。
+
 ## [0.3.0] - 2026-11-22
 
 ### 新增

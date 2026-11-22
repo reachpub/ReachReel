@@ -10,6 +10,34 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Tercel" }]
+keywords = [
+  "video",
+  "narration",
+  "voiceover",
+  "subtitles",
+  "tts",
+  "asr",
+  "whisper",
+  "kokoro",
+  "mlx",
+  "ollama",
+  "ffmpeg",
+  "local-first",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Operating System :: MacOS",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Multimedia :: Video",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
   "mlx-audio>=0.6.7",
   "mlx-whisper>=0.4.3",
@@ -22,10 +50,18 @@ dependencies = [
 # APCore checks (source charset, circular imports) and `apdev release`.
 dev = [
   "apdev[dev]>=0.2.5",
+  "pre-commit>=3.5",
 ]
 
 [project.scripts]
 reachreel = "reachreel.cli.main:main"
+
+[project.urls]
+Homepage = "https://github.com/reachpub/ReachReel"
+Repository = "https://github.com/reachpub/ReachReel"
+Documentation = "https://github.com/reachpub/ReachReel/blob/main/docs/README.md"
+Changelog = "https://github.com/reachpub/ReachReel/blob/main/CHANGELOG.md"
+Issues = "https://github.com/reachpub/ReachReel/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/reachreel"]
