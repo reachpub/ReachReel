@@ -59,6 +59,10 @@ jobs:
           echo "Checking commit messages in $RANGE"
           python3 scripts/check_commit_messages.py --range "$RANGE"
 
+      - name: Changelog language parity
+        # Markdown only: no virtualenv, no third-party packages.
+        run: python3 scripts/check_changelog.py
+
       - name: Language gate (no CJK in Python source)
         # Localized copy lives in locales/*.toml and prompts/*.toml only. Running
         # this test on its own keeps the failure message focused on the file and

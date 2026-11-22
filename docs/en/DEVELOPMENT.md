@@ -95,6 +95,7 @@ qa
 | `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits validator shared by the git hook and CI | `validate`, `messages_in_range` |
+| `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` structural parity | `parse`, `compare`, `main` |
 
 ---
 
@@ -675,6 +676,17 @@ The header is `type(scope): subject` (`scope` optional, `!` marks a breaking cha
 - in CI, over the commits a push or pull request adds (`origin/<base>..HEAD` for pull requests).
 
 `tests/unit/test_commit_messages.py` covers the validator, including that the hook stays executable.
+
+### Changelog parity
+
+`scripts/check_changelog.py` runs in CI and compares `CHANGELOG.md` with `CHANGELOG.zh-CN.md` without any dependency:
+
+- both files keep a banner linking to the other language version;
+- the version headings (`## [Unreleased]`, `## [x.y.z] - date`) match and are in the same order;
+- each version has the same sections in the same order, and the English file uses the English heading while the Chinese file uses the Chinese one (`Added` / `新增`, `Changed` / `变更`, `Fixed` / `修复`, `Validation` / `验证`, `Known limitations` / `已知限制`, ...);
+- each section has the same number of bullets, which is what catches a forgotten translation.
+
+A new section heading must be registered in `SECTIONS` inside the script; the check prints the exact heading and the expected translation. `tests/unit/test_changelog_sync.py` covers every rule plus the real repository pair.
 
 ### Synthetic test footage
 

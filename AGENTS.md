@@ -141,4 +141,5 @@ The installed command is `reachreel`.
   - `feat(media): add scene-aware frame selection`
   - `docs(i18n): add English user guide`
   - `chore(ci): run ruff and unit tests`
+- Changelog parity is enforced by `scripts/check_changelog.py` in CI: same version headings, same sections (English file in English, Chinese file in Chinese), and the same number of bullets per section.
 - The format is enforced by `scripts/check_commit_messages.py`: locally through `.githooks/commit-msg` and in CI over the commits a push or pull request adds. Header is `type(scope): subject` (scope optional, `!` for a breaking change), at most 72 characters, no trailing period, English only.

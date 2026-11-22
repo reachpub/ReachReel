@@ -95,6 +95,7 @@ qa
 | `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor`, `doctor_report` |
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits 校验器，git hook 与 CI 共用 | `validate`, `messages_in_range` |
+| `scripts/check_changelog.py` | `CHANGELOG.md` / `CHANGELOG.zh-CN.md` 结构一致性 | `parse`, `compare`, `main` |
 
 ---
 
@@ -675,6 +676,17 @@ refactor(core)!: drop python 3.10
 - CI：检查本次 push 或 PR 新增的提交（PR 用 `origin/<base>..HEAD`）。
 
 `tests/unit/test_commit_messages.py` 覆盖校验器，其中一条断言 hook 保持可执行权限。
+
+### 变更记录一致性
+
+`scripts/check_changelog.py` 在 CI 中运行，零依赖对比 `CHANGELOG.md` 与 `CHANGELOG.zh-CN.md`：
+
+- 两个文件都保留指向另一语言版本的语言横幅；
+- 版本标题（`## [Unreleased]`、`## [x.y.z] - date`）一致且顺序相同；
+- 每个版本的章节一致且顺序相同，且英文文件用英文标题、中文文件用中文标题（`Added` / `新增`、`Changed` / `变更`、`Fixed` / `修复`、`Validation` / `验证`、`Known limitations` / `已知限制` 等）；
+- 每个章节的条目数一致——这是漏翻最容易暴露的地方。
+
+新增章节标题需要在脚本的 `SECTIONS` 里登记，检查会打印违规标题与期望译名。`tests/unit/test_changelog_sync.py` 覆盖全部规则以及仓库里真实的这对文件。
 
 ### 合成测试素材
 
