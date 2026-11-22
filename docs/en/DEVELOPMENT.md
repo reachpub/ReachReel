@@ -637,6 +637,8 @@ uvx ruff check src/reachreel tests
 python -m unittest discover -s tests -v
 ```
 
+Development requires macOS on Apple silicon. `reachreel doctor` reports a failing `Platform` check on Intel macOS, Linux, and Windows, because MLX ships no x86_64 macOS build.
+
 ### Synthetic test footage
 
 ```bash
@@ -674,7 +676,7 @@ Current:
 - `tests/unit/test_qa.py`: SRT parsing, QA exit codes, settings snapshot, `[qa]` thresholds, astats parsing, subtitle margins, per-sentence alignment, `--only` parsing.
 - `tests/unit/test_i18n_prompts.py`: catalog key parity, prompt packs, English prompt hygiene, and the CJK-free Python source guard.
 - `tests/integration/test_smoke.py`: opt-in end-to-end smoke (`REACHREEL_INTEGRATION=1`) that runs `tts → subtitle --asr none → mix --no-bgm → render --no-burn → qa` through the real CLI with macOS `say` on a generated clip; no models or network.
-- CI: `.github/workflows/ci.yml` runs Ruff, the unit suite, and `uv build` on macOS for Python 3.10 and 3.12.
+- CI: `.github/workflows/ci.yml` runs Ruff, the unit suite, and `uv build` on `macos-15` (Apple silicon) for Python 3.11 and 3.12. The label is pinned on purpose: GitHub retires macOS images regularly, and a retired label fails every job at queue time with `<configuration> is not supported`, not with a test failure. Only currently supported arm64 labels are used; Intel macOS is not targeted.
 - No golden outputs yet.
 
 Suggested additions:
@@ -701,7 +703,7 @@ Suggested additions:
 
 ## 11. Code conventions
 
-- Python 3.10+, `from __future__ import annotations`.
+- Python 3.11+ (3.10 is rejected because `mlx-audio` requires 3.11+), `from __future__ import annotations`.
 - Prefer dataclasses; avoid global mutable state.
 - All external commands go through `core.util.run`; error messages keep the tail of stderr.
 - Write files with `core.util.atomic_write_json` (temp file + rename).

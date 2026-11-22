@@ -42,7 +42,7 @@ No cloud API and no per-minute billing. The first run downloads the Kokoro and W
 ### 1. Environment
 
 - Apple Silicon Mac (M1 or newer)
-- Python 3.10–3.12
+- Python 3.11–3.12
 - Homebrew
 - 32 GB RAM recommended; 16 GB works with `vlm_workers = 1`
 

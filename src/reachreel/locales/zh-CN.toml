@@ -205,6 +205,9 @@ edit_hint = "编辑 `script.json` 里的 `text`，然后用同一个 `--workdir`
 
 [doctor]
 title = "ReachReel doctor"
+platform = "平台"
+platform_ok = "{host}（Apple Silicon）"
+platform_unsupported = "{host} —— 不支持，必须 Apple Silicon 上的 macOS"
 python = "Python"
 ffmpeg_full = "ffmpeg-full / libass"
 ffmpeg_full_missing = "缺失（硬字幕禁用）"

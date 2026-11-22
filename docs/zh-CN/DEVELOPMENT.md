@@ -637,6 +637,8 @@ uvx ruff check src/reachreel tests
 python -m unittest discover -s tests -v
 ```
 
+开发环境必须是 Apple Silicon 上的 macOS。`reachreel doctor` 在 Intel macOS、Linux、Windows 上会让 `平台` 这项失败，因为 MLX 没有 x86_64 macOS 构建。
+
 ### 合成测试素材
 
 ```bash
@@ -674,7 +676,7 @@ reachreel run /tmp/vf_test.mp4 \
 - `tests/unit/test_qa.py`：SRT 解析、QA 退出码、settings 快照、`[qa]` 阈值、astats 解析、字幕边距、逐句对齐、`--only` 解析。
 - `tests/unit/test_i18n_prompts.py`：语言目录键一致、prompt 包、英文 prompt 卫生、Python 源码无 CJK 检查。
 - `tests/integration/test_smoke.py`：可选的端到端 smoke（`REACHREEL_INTEGRATION=1`），用 macOS `say` 在合成素材上通过真实 CLI 跑 `tts → subtitle --asr none → mix --no-bgm → render --no-burn → qa`；不需要模型或网络。
-- CI：`.github/workflows/ci.yml` 在 macOS 上对 Python 3.10 和 3.12 跑 Ruff、单元测试和 `uv build`。
+- CI：`.github/workflows/ci.yml` 在 `macos-15`（Apple Silicon）上对 Python 3.11 和 3.12 跑 Ruff、单元测试和 `uv build`。标签是刻意固定的：GitHub 会定期下线 macOS 镜像，被下线的标签会让所有任务在排队阶段就失败，报的是 `<配置> is not supported`，而不是测试失败。只使用当前仍支持的 arm64 标签，不支持 Intel macOS。
 - 目前没有 golden output。
 
 建议补充：
@@ -701,7 +703,7 @@ reachreel run /tmp/vf_test.mp4 \
 
 ## 11. 代码约定
 
-- Python 3.10+，`from __future__ import annotations`。
+- Python 3.11+（`mlx-audio` 要求 3.11+，因此拒绝 3.10），`from __future__ import annotations`。
 - 数据类优先；避免全局可变状态。
 - 外部命令统一走 `core.util.run`，错误信息保留 stderr 尾部。
 - 文件写入用 `core.util.atomic_write_json`（临时文件 + rename）。

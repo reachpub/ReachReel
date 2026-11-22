@@ -11,7 +11,14 @@ from typing import Any
 
 from ..core.cache import cache_root, tts_cache_dir, video_key, vlm_cache_path
 from ..core.config import Settings, settings_to_dict
-from ..core.util import LOG, atomic_write_json, ffmpeg_full, read_json
+from ..core.util import (
+    LOG,
+    atomic_write_json,
+    ffmpeg_full,
+    host_platform,
+    platform_supported,
+    read_json,
+)
 from ..domain.models import (
     NarrationSegment,
     QualityFlag,
@@ -962,6 +969,16 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
         )
 
     add("python", t("doctor.python"), sys.version.split()[0])
+    host = host_platform()
+    supported_host = platform_supported()
+    add(
+        "platform",
+        t("doctor.platform"),
+        t("doctor.platform_ok", host=host)
+        if supported_host
+        else t("doctor.platform_unsupported", host=host),
+        supported_host,
+    )
     for tool in ("ffmpeg", "ffprobe"):
         path = shutil.which(tool)
         add(tool, tool, path or t("doctor.missing"), bool(path))

@@ -6,13 +6,9 @@ English output loads ``prompts/en``. The selected pack follows
 """
 from __future__ import annotations
 
+import tomllib
 from functools import lru_cache
 from importlib import resources
-
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib
 
 DEFAULT_LANGUAGE = "zh"
 SUPPORTED_LANGUAGES = ("zh", "en")

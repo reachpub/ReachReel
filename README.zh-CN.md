@@ -43,7 +43,7 @@
 ### 1. 环境
 
 - Apple Silicon Mac（M1 及以上）
-- Python 3.10 – 3.12
+- Python 3.11 – 3.12
 - Homebrew
 - 建议 32 GB 内存以上；16 GB 也能跑，但把 `vlm_workers` 设为 1
 

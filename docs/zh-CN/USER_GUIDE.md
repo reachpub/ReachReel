@@ -38,12 +38,14 @@
 | 项目 | 要求 |
 |---|---|
 | 机器 | Apple Silicon Mac（M1 / M2 / M3 / M4） |
-| 系统 | macOS 13+，建议最新稳定版 |
-| Python | 3.10 – 3.12（不要用 3.13，Kokoro 依赖链未完全适配） |
+| 系统 | macOS 14+（Sonoma 及以上），Apple Silicon；CI 验证 macOS 15 |
+| Python | 3.11 – 3.12（不支持 3.10，`mlx-audio` 要求 3.11+；也不要用 3.13，Kokoro 依赖链未完全适配） |
 | 内存 | 16 GB 可跑；32 GB 更稳；64 GB 可提高 VLM 并发 |
 | 磁盘 | 至少 10 GB 空闲（模型 + 中间文件） |
 | 外部工具 | `ffmpeg`、`ffmpeg-full`、`ffprobe`、`ollama` |
 | 网络 | 第一次下载模型需要；之后可离线 |
+
+**不支持 Intel Mac**。`mlx-audio` / `mlx-whisper` 没有 x86_64 macOS 轮子，用 Rosetta 或 x86 版跑同一条流水线既慢、质量也差（只能用更小的模型、更少的抽帧、没有 Kokoro）。`reachreel doctor` 会在任何非「Apple Silicon macOS」的主机上让 `平台` 这一项失败；如果只是想在某台机器上验证工具链接线，忽略那一行 `!!`、看其余检查即可。
 
 ---
 

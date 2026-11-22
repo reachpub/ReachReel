@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 支持平台收窄为 Apple Silicon 上的 macOS 14+；不支持 Intel macOS，CI 固定使用当前 arm64 标签。
+- `reachreel doctor` 增加主机架构检查：非 Apple Silicon 机器上的 `平台` 一项会直接判失败，而不是默默跑出很慢的结果。
+- 最低 Python 版本提高到 3.11（`mlx-audio` 的硬性要求），并移除 `tomli` 回退；Python 3.10 已无法安装本包。
+
+### 修复
+
+- CI 改用 `macos-15`：`macos-14` 标签已下线，排队任务会报错 “The configuration 'macos-14-arm64-us-xl' is not supported”。
+
 ## [0.2.0] - 2026-11-22
 
 ### 新增

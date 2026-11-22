@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Supported platform narrowed to macOS 14+ on Apple silicon; Intel macOS is not targeted, and CI pins the current arm64 label.
+- `reachreel doctor` now checks the host architecture and fails a `Platform` row on non-Apple-silicon machines instead of letting them run slowly.
+- Minimum Python is now 3.11 (`mlx-audio` requires it) and the `tomli` fallback was removed; Python 3.10 can no longer install the package.
+
+### Fixed
+
+- CI now runs on `macos-15`: the `macos-14` label was retired and queued jobs failed with "The configuration 'macos-14-arm64-us-xl' is not supported".
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

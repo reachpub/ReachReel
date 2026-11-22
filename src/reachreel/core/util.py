@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -179,6 +180,26 @@ def chunked(items: Iterable[Any], size: int) -> Iterable[list[Any]]:
             bucket = []
     if bucket:
         yield bucket
+
+
+def platform_supported(
+    system: str | None = None,
+    machine: str | None = None,
+) -> bool:
+    """ReachReel targets Apple silicon macOS only.
+
+    ``mlx-audio`` and ``mlx-whisper`` have no x86_64 macOS build, and the same
+    pipeline on Intel hardware is both slow and lower quality. The arguments
+    exist so the check stays testable without the host being arm64.
+    """
+    current_system = (system or platform.system()).lower()
+    current_machine = (machine or platform.machine()).lower()
+    return current_system == "darwin" and current_machine in {"arm64", "aarch64"}
+
+
+def host_platform() -> str:
+    """Return a short ``system/machine`` label for reports and error messages."""
+    return f"{platform.system()}/{platform.machine()}"
 
 
 def ensure_tool(name: str) -> None:

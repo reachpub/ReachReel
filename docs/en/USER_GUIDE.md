@@ -38,12 +38,14 @@ These are covered as future work in [ROADMAP.md](ROADMAP.md).
 | Item | Requirement |
 |---|---|
 | Machine | Apple Silicon Mac (M1 / M2 / M3 / M4) |
-| OS | macOS 13+, latest stable release recommended |
-| Python | 3.10 – 3.12 (do not use 3.13; the Kokoro dependency chain is not fully compatible yet) |
+| OS | macOS 14+ (Sonoma or later) on Apple silicon; CI validates macOS 15 |
+| Python | 3.11 – 3.12 (3.10 is unsupported because `mlx-audio` requires 3.11+; do not use 3.13, the Kokoro dependency chain is not fully compatible yet) |
 | Memory | 16 GB works; 32 GB is more comfortable; 64 GB allows higher VLM concurrency |
 | Disk | At least 10 GB free (models + intermediate files) |
 | External tools | `ffmpeg`, `ffmpeg-full`, `ffprobe`, `ollama` |
 | Network | Needed for the initial model download; offline afterwards |
+
+Intel Macs are **not supported**. `mlx-audio` / `mlx-whisper` publish no x86_64 macOS wheels, and a Rosetta/x86 build of the same pipeline is both slower and lower quality (draft models, fewer frames, no Kokoro). `reachreel doctor` fails the `Platform` check on any host that is not macOS on Apple silicon; if you only want to check tool wiring on such a machine, expect that one `!!` row and ignore the rest of the report.
 
 ---
 

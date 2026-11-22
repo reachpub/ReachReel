@@ -58,7 +58,7 @@ cli -> pipeline -> {generation, engines, media, domain} -> core
 ## Commands
 
 ```bash
-# Environment (Python 3.10-3.12; 3.12 is recommended)
+# Environment (Python 3.11-3.12; 3.12 is recommended)
 python3.12 -m venv .venv
 uv pip install --python .venv/bin/python -e .
 
@@ -87,7 +87,7 @@ The installed command is `reachreel`.
 
 ## Code rules
 
-- Python 3.10+, `from __future__ import annotations`.
+- Python 3.11+, `from __future__ import annotations`.
 - Prefer dataclasses and explicit types. Avoid global mutable state.
 - Keep the CLI thin. Business logic belongs in `pipeline/`, `generation/`, `engines/`, or `media/`.
 - Run external commands through `core.util.run`. Keep a bounded timeout and preserve the stderr tail in errors.

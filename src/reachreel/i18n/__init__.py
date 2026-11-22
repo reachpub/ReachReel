@@ -7,12 +7,8 @@ of narration and subtitles) is a separate setting.
 from __future__ import annotations
 
 import os
+import tomllib
 from importlib import resources
-
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib
 
 DEFAULT_LANGUAGE = "en"
 SUPPORTED_LANGUAGES = ("en", "zh-CN")

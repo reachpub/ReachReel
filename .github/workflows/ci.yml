@@ -12,11 +12,13 @@ concurrency:
 jobs:
   test:
     name: lint + unit tests (Python ${{ matrix.python-version }})
-    runs-on: macos-14
+    # macOS 14 images are retired; macos-15 is the current arm64 (Apple silicon)
+    # label, which matches the MLX/`say` runtime this project targets.
+    runs-on: macos-15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -34,10 +36,6 @@ jobs:
 
       - name: Install lightweight dependencies used by unit tests
         run: uv pip install --python .venv/bin/python 'platformdirs>=4.0'
-
-      - name: Install TOML shim for Python 3.10
-        if: matrix.python-version == '3.10'
-        run: uv pip install --python .venv/bin/python 'tomli>=2.0'
 
       - name: Lint
         run: uvx ruff@0.17.6 check src/reachreel tests

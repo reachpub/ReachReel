@@ -1,12 +1,8 @@
 import re
+import tomllib
 import unittest
 from importlib import resources
 from pathlib import Path
-
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10 fallback
-    import tomli as tomllib
 
 from reachreel.core.config import Settings
 from reachreel.domain.models import Scene

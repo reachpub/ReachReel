@@ -205,6 +205,9 @@ edit_hint = "Edit `text` in `script.json`, then rerun with the same `--workdir`.
 
 [doctor]
 title = "ReachReel doctor"
+platform = "Platform"
+platform_ok = "{host} (Apple silicon)"
+platform_unsupported = "{host} - unsupported; requires macOS on Apple silicon"
 python = "Python"
 ffmpeg_full = "ffmpeg-full / libass"
 ffmpeg_full_missing = "missing (hard subtitles disabled)"

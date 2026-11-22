@@ -13,7 +13,7 @@ from reachreel.core.cache import (
     video_key,
 )
 from reachreel.core.config import Settings
-from reachreel.core.util import srt_timestamp
+from reachreel.core.util import platform_supported, srt_timestamp
 from reachreel.domain.models import (
     Cue,
     NarrationSegment,
@@ -52,6 +52,14 @@ from reachreel.pipeline.orchestrator import Pipeline
 
 
 class UnitTests(unittest.TestCase):
+    def test_platform_supported_requires_apple_silicon(self):
+        self.assertTrue(platform_supported("Darwin", "arm64"))
+        self.assertTrue(platform_supported("Darwin", "aarch64"))
+        self.assertTrue(platform_supported("darwin", "ARM64"))
+        self.assertFalse(platform_supported("Darwin", "x86_64"))
+        self.assertFalse(platform_supported("Linux", "aarch64"))
+        self.assertFalse(platform_supported("Windows", "AMD64"))
+
     def test_srt_timestamp(self):
         self.assertEqual(srt_timestamp(0), "00:00:00,000")
         self.assertEqual(srt_timestamp(3661.234), "01:01:01,234")
