@@ -8,7 +8,13 @@ from pathlib import Path
 from typing import Any
 
 from ..i18n import normalize_language
-from ..languages import normalize_tag
+from ..languages import (
+    PROFILES,
+    LanguageProfile,
+    normalize_tag,
+    profile_for,
+    resolve_asr_language,
+)
 from ..prompts import normalize_language as normalize_content_language
 
 
@@ -39,7 +45,7 @@ class Settings:
     # Script
     style: str = ""  # empty = language-specific default from prompts/<lang>/style.txt
     brief: str = ""
-    speech_chars_per_second: float = 3.9
+    speech_chars_per_second: float = 0.0  # 0 = language default (3.9 zh, 14.5 en)
     narration_density: float = 0.62
     min_gap_seconds: float = 0.28
     start_offset: float = 0.7
@@ -52,19 +58,19 @@ class Settings:
     # Engine codes (Kokoro a/b/z, Whisper zh/en) never appear here.
     tts_language: str = ""
     kokoro_model: str = "mlx-community/Kokoro-82M-4bit"
-    voice: str = "zf_xiaoxiao"
+    voice: str = ""  # empty = language default (zf_xiaoxiao, af_heart, bf_emma)
     tts_speed: float = 1.0
-    say_voice: str = "Tingting"
+    say_voice: str = ""  # empty = language default (Tingting, Samantha, Daniel)
 
     # ASR / subtitles
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
     # Whisper hint; empty follows the primary subtag of content_language.
     asr_language: str = ""
     subtitle_text: str = "script"  # script | asr
-    subtitle_max_chars: int = 18
+    subtitle_max_chars: int = 0  # 0 = language default (18 zh, 42 en)
     subtitle_max_lines: int = 2
     subtitle_max_seconds: float = 6.0
-    subtitle_font: str = "PingFang SC"
+    subtitle_font: str = ""  # empty = language default (PingFang SC, Helvetica Neue)
     subtitle_size: int = 48  # output pixels (ASS PlayRes = output resolution)
     # outline: white text + black outline (covers little of the frame)
     # box: white text on a translucent black box (older behaviour)
@@ -195,6 +201,47 @@ class Settings:
 
     def resolved_bgm_dir(self) -> Path:
         return Path(self.bgm_dir).expanduser()
+
+    def content_profile(self) -> LanguageProfile:
+        return profile_for(self.content_language) or PROFILES["zh-CN"]
+
+    def _voice_profile(self) -> LanguageProfile:
+        if self.tts_language:
+            profile = profile_for(self.tts_language)
+            if profile is not None:
+                return profile
+        return self.content_profile()
+
+    def resolved_speech_chars_per_second(self) -> float:
+        if self.speech_chars_per_second > 0:
+            return float(self.speech_chars_per_second)
+        return self.content_profile().speech_chars_per_second
+
+    def resolved_voice(self) -> str:
+        explicit = (self.voice or "").strip()
+        if explicit:
+            return explicit
+        return self._voice_profile().default_voice or PROFILES["zh-CN"].default_voice
+
+    def resolved_say_voice(self) -> str:
+        explicit = (self.say_voice or "").strip()
+        if explicit:
+            return explicit
+        return self._voice_profile().default_say_voice or PROFILES["zh-CN"].default_say_voice
+
+    def resolved_subtitle_max_chars(self) -> int:
+        if self.subtitle_max_chars > 0:
+            return int(self.subtitle_max_chars)
+        return self.content_profile().subtitle_max_chars
+
+    def resolved_subtitle_font(self) -> str:
+        explicit = (self.subtitle_font or "").strip()
+        if explicit:
+            return explicit
+        return self.content_profile().font_hint
+
+    def resolved_asr_language(self) -> str:
+        return resolve_asr_language(self.asr_language, self.content_language)
 
 
 SUBTITLE_PRESETS = ("", "douyin", "reels", "shorts", "landscape")

@@ -50,6 +50,9 @@
 | `speech_chars_per_second` | 稿子长度目标，避免用中文标准去量英文 |
 | `subtitle_max_chars` | 行字数默认值，中文约 18，空格语言约 42 |
 | `font_hint` | 覆盖该文字系统的字体 |
+| `default_voice` | `voice` 留空时的默认 Kokoro 音色 |
+| `default_say_voice` | `say_voice` 留空时的默认 macOS `say` 调试音色 |
+| `iso639_2` | 写入软字幕轨元数据的 ISO 639-2 代码（`chi`、`eng`） |
 | `tts` | `{引擎: 内部代码}` |
 | `requires` | 可选依赖 extra，例如 `tts-en` |
 
@@ -57,8 +60,8 @@
 
 | 标签 | 配音 | 说明 |
 |---|---|---|
-| `zh-CN` | 支持 | Kokoro + `misaki[zh]`，目前唯一端到端验证过的语言 |
-| `en-US`、`en-GB` | 计划中 | 需要固定并验证过的 G2P 组合，见第 5 节 |
+| `zh-CN` | 支持 | Kokoro + `misaki[zh]`，已在真实素材上端到端验证 |
+| `en-US`、`en-GB` | 支持 | Kokoro + 无 torch 的 `tts-en` extra（`spacy` + `en_core_web_sm` + `espeakng-loader` + `phonemizer-fork`）；已端到端验证（Whisper 回环 CER 0.00%–0.51%，尼亚加拉瀑布 1080p QA 20/20） |
 | `ja-JP` | 计划中 | `misaki[ja]` |
 | `es-ES`、`fr-FR`、`hi-IN`、`it-IT`、`pt-BR` | 计划中 | espeak-ng G2P |
 
@@ -80,12 +83,15 @@
 
 - 按语言组提供可选 extra：`tts-zh`、`tts-en`、`tts-ja`。由 espeak-ng 支撑的语言不需要
   额外依赖。
-- 默认安装保持 torch-free。`misaki[en]` 会带入 spacy 与 spacy-curated-transformers，
-  进而带入 torch（约 600MB）；`misaki[ja]` 更轻，但同样可选。
+- 默认安装保持 torch-free。`mlx-audio` 的 `KokoroPipeline` 在英文 G2P 路径固定使用
+  `trf=False`（`en_core_web_sm` + `EspeakFallback`），因此 `tts-en` extra 只安装
+  `spacy`、`num2words`、`espeakng-loader` 与 `phonemizer-fork`，不带入
+  `spacy-curated-transformers` 与约 600 MB 的 `torch`。安装 `reachreel[tts-en]` 后
+  执行一次 `python -m spacy download en_core_web_sm` 即可。
 - 只有第 6 节的验证在固定版本组合上通过，才能标记为支持。一个实测反例：在 numpy 2.5 +
-  `misaki[en]` 的环境里，英文合成时而正常、时而报
-  `ValueError: Only length-1 arrays can be converted to Python scalars`，取决于当时装
-  了哪个 spacy 模型，而中文一直正常。依赖状态不稳定，就不算「支持」。
+  `misaki[en]` 的环境里，拉入 transformer 版 spacy 模型（`en_core_web_trf`）会间歇性报
+  `ValueError: Only length-1 arrays can be converted to Python scalars`，而无 transformer
+  的 `en_core_web_sm` 组合在 `en-US` 与 `en-GB` 上均稳定通过。依赖状态不稳定，就不算「支持」。
 
 ## 6. 声明某语言「支持」的门槛
 

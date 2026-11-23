@@ -116,13 +116,16 @@ def _fallback_segments(
 ) -> list[NarrationSegment]:
     """If the LLM fails, build a conservative script from the scene descriptions."""
     english = content_language == "en"
+    group_char_limit = 180 if english else 55
     groups: list[list[Scene]] = []
     current: list[Scene] = []
     current_len = 0
     for scene in scenes:
         text = (scene.hint or scene.summary or "").strip()
         length = len(text)
-        if current and (current_len + length > 55 or scene.start - current[0].start > 8.0):
+        if current and (
+            current_len + length > group_char_limit or scene.start - current[0].start > 8.0
+        ):
             groups.append(current)
             current = []
             current_len = 0
@@ -301,7 +304,7 @@ def generate_script(
 def _clean_text(text: str, content_language: str = "zh") -> str:
     if content_language == "en":
         text = re.sub(r"\s+", " ", text).strip()
-        if text and not text.endswith((".", "!", "?")):
+        if text and not text.endswith((".", "!", "?", '."', '!"', '?"', ".”", "!”", "?”")):
             text += "."
         return text
     text = re.sub(r"\s+", "", text)

@@ -14,6 +14,7 @@ from ..core.util import run
 from ..domain.models import NarrationSegment, QualityFlag
 from ..languages import (
     LanguageProfile,
+    check_tts_dependencies,
     require_tts,
     require_voice_match,
     resolve_tts_language,
@@ -32,11 +33,101 @@ KOKORO_ZH_VOICES = [
     "zm_yunyang",
 ]
 
+KOKORO_EN_US_VOICES = [
+    "af_heart",
+    "af_alloy",
+    "af_aoede",
+    "af_bella",
+    "af_jessica",
+    "af_kore",
+    "af_nicole",
+    "af_nova",
+    "af_river",
+    "af_sarah",
+    "af_sky",
+    "am_adam",
+    "am_echo",
+    "am_eric",
+    "am_fenrir",
+    "am_liam",
+    "am_michael",
+    "am_onyx",
+    "am_puck",
+]
 
-def _split_for_tts(text: str, limit: int = 70) -> list[str]:
+KOKORO_EN_GB_VOICES = [
+    "bf_alice",
+    "bf_emma",
+    "bf_isabella",
+    "bf_lily",
+    "bm_daniel",
+    "bm_fable",
+    "bm_george",
+    "bm_lewis",
+]
+
+
+def _pack_whitespace_pieces(pieces: list[str], limit: int) -> list[str]:
+    """Pack whitespace-separated pieces into chunks up to ``limit`` characters."""
+    chunks: list[str] = []
+    current = ""
+    for piece in pieces:
+        piece = piece.strip()
+        if not piece:
+            continue
+        candidate = f"{current} {piece}" if current else piece
+        if len(candidate) <= limit:
+            current = candidate
+            continue
+        if current:
+            chunks.append(current)
+            current = ""
+        if len(piece) <= limit:
+            current = piece
+            continue
+        # Clause or sentence is still too long: wrap by words without splitting them.
+        for word in piece.split():
+            word_candidate = f"{current} {word}" if current else word
+            if len(word_candidate) <= limit:
+                current = word_candidate
+                continue
+            if current:
+                chunks.append(current)
+                current = ""
+            while len(word) > limit:
+                chunks.append(word[:limit])
+                word = word[limit:]
+            current = word
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _split_for_tts(
+    text: str,
+    limit: int | None = None,
+    *,
+    primary_language: str = "zh",
+) -> list[str]:
     text = text.strip()
+    if not text:
+        return []
+    is_cjk = primary_language in {"zh", "ja", "ko"} and " " not in text
+    if limit is None:
+        limit = 70 if is_cjk else 250
     if len(text) <= limit:
-        return [text] if text else []
+        return [text]
+    if not is_cjk:
+        sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+        expanded: list[str] = []
+        for sentence in sentences:
+            if len(sentence) <= limit:
+                expanded.append(sentence)
+            else:
+                expanded.extend(
+                    c.strip() for c in re.split(r"(?<=[;,—:])\s+", sentence) if c.strip()
+                )
+        return _pack_whitespace_pieces(expanded, limit)
     pieces = re.split(r"(?<=[。！？；，、])", text)
     chunks: list[str] = []
     current = ""
@@ -66,19 +157,29 @@ class KokoroEngine:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._model = None
+        self._profile: LanguageProfile | None = None
         self._lang_code: str | None = None
 
     def language(self) -> LanguageProfile:
         """Resolve and validate the pronunciation language for this run."""
+        voice = self.settings.resolved_voice()
         profile = resolve_tts_language(
             tts_language=self.settings.tts_language,
             content_language=self.settings.content_language,
-            voice=self.settings.voice,
+            voice=voice,
         )
-        # Status first: "English is planned" is more useful than "wrong voice".
+        # Status first: "planned" is more useful than "wrong voice".
         self._lang_code = require_tts(profile, "kokoro")
-        require_voice_match(profile, self.settings.voice)
+        require_voice_match(profile, voice)
+        self._profile = profile
         return profile
+
+    def _ensure_g2p(self, profile: LanguageProfile) -> None:
+        ok, detail = check_tts_dependencies(profile, "kokoro")
+        if not ok:
+            raise RuntimeError(
+                f"Kokoro {profile.tag} G2P dependencies are missing: {detail}"
+            )
 
     def _load(self):
         if self._model is not None:
@@ -96,11 +197,12 @@ class KokoroEngine:
     def synthesize(self, text: str, out_wav: Path, *, speed: float = 1.0) -> float:
         import numpy as np
 
+        profile = self._profile or self.language()
+        self._ensure_g2p(profile)
         model = self._load()
-        if self._lang_code is None:
-            self.language()
         lang_code = self._lang_code
-        chunks = _split_for_tts(text)
+        voice = self.settings.resolved_voice()
+        chunks = _split_for_tts(text, primary_language=profile.primary)
         if not chunks:
             raise RuntimeError("TTS text is empty")
         audio_parts: list[np.ndarray] = []
@@ -109,7 +211,7 @@ class KokoroEngine:
             results = list(
                 model.generate(
                     chunk,
-                    voice=self.settings.voice,
+                    voice=voice,
                     lang_code=lang_code,
                     speed=speed,
                 )
@@ -176,7 +278,7 @@ class SayEngine:
         profile = resolve_tts_language(
             tts_language=self.settings.tts_language,
             content_language=self.settings.content_language,
-            voice=self.settings.say_voice,
+            voice=self.settings.resolved_say_voice(),
         )
         if profile.status != "supported" and not self._warned:
             LOG.warning(
@@ -196,7 +298,7 @@ class SayEngine:
             [
                 "say",
                 "-v",
-                self.settings.say_voice,
+                self.settings.resolved_say_voice(),
                 "-r",
                 str(rate),
                 "-o",
@@ -293,11 +395,18 @@ def synthesize_segments(
     """
     audio_dir.mkdir(parents=True, exist_ok=True)
     engine = make_engine(settings)
+    if hasattr(engine, "language"):
+        engine.language()
+    voice_key = (
+        settings.resolved_voice()
+        if settings.tts_engine != "say"
+        else (settings.voice.strip() or settings.resolved_say_voice())
+    )
     flags: list[QualityFlag] = []
     failed = 0
     for index, segment in enumerate(segments, start=1):
         key = hashlib.sha1(
-            f"{settings.tts_engine}|{settings.kokoro_model}|{settings.voice}|{speed:.4f}|{segment.text}".encode()
+            f"{settings.tts_engine}|{settings.kokoro_model}|{voice_key}|{speed:.4f}|{segment.text}".encode()
         ).hexdigest()[:16]
         out = audio_dir / f"seg_{index:03d}_{key}.wav"
         shared = shared_dir / f"{key}.wav" if shared_dir is not None else None
@@ -370,6 +479,6 @@ def synthesize_segments(
     if segments and failed == len(segments):
         raise RuntimeError(
             f"TTS failed for every segment ({failed}/{len(segments)}). "
-            f"Check the engine ({settings.tts_engine}) and voice ({settings.voice})."
+            f"Check the engine ({settings.tts_engine}) and voice ({voice_key})."
         )
     return flags

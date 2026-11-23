@@ -6,8 +6,18 @@
 
 ### 新增
 
+- 支持英文旁白、英文配音与英文字幕（`en-US` 与 `en-GB` 在 `src/reachreel/languages.py` 中升级为 `supported`）。运行 `reachreel run video.mp4 --content-language en`（或 `--tts-language en-GB`）时会自动解析整套英文配置：口播估算语速（`14.5` 字符/秒）、默认 Kokoro 音色（`af_heart` / `bf_emma`）、默认 macOS `say` 音色（`Samantha` / `Daniel`）、Whisper `en` 提示、字幕行宽（`42` 字符）、拉丁字体（`Helvetica Neue`）以及软字幕轨元数据（`language=eng`）。
+- 在 `pyproject.toml` 新增无 torch 的可选依赖 `tts-en`（`spacy`、`num2words`、`espeakng-loader`、`phonemizer-fork`），与 `mlx-audio` 非 transformer 的 `KokoroPipeline`（`trf=False` + `en_core_web_sm` + `EspeakFallback`）一致；同时提供中文语言组 `tts-zh`。
+- `_split_for_tts` 适配英文切段（按句末/从句标点与空格切分，单段上限 250 字符，不再在 70 字符处腰斩单词），`media/subtitles.py` 支持按英文句读切分与双行均衡换行。
+- `reachreel doctor` 支持 `--content-language`、`--tts-language`、`--voice` 与 `--tts`，会校验音色与语言是否一致，并按目标语言检查 G2P 依赖（含 `en_core_web_sm`）及给出可执行安装命令。
+- 按 `docs/zh-CN/LANGUAGES.md` 第 6 节完成 `en-US` 与 `en-GB` 验证：Whisper 回环 CER 为 0.00%（`af_heart`、`am_michael`、`bf_emma`）和 0.51%（`bm_george`），尼亚加拉瀑布 1080p 英文全流程实跑 QA 20/20 通过（`pass=20 warn=0 fail=0`）。
+- 新增中英双语 MkDocs Material 文档站（`mkdocs.yml`、`scripts/mkdocs_hooks.py`、`pyproject.toml` 中的 `docs` extra），默认英文在站点根路径、简体中文在 `/zh-CN/`，并通过 `.github/workflows/docs.yml` 在构建时从 `README.md` / `README.zh-CN.md` 复制生成 `index.md`、以严格模式构建并部署到 GitHub Pages。
 - `[tool.apdev] pypi_repository = "reachreel"` 让 `apdev release` 使用 `~/.pypirc` 的 `[reachreel]` 段：本项目走自己的 PyPI 账号，其他仓库继续用默认段。需要 `apdev >= 0.2.6`；DEVELOPMENT 里写清了优先级、首次上传决定归属，以及 `TWINE_REPOSITORY` 兜底方式。
 - `pyproject.toml` 补齐 PyPI 页面所需元数据：`Project-URL`（主页、仓库、文档、变更记录、Issues）、11 条 Trove 分类、关键词与作者。`twine check` 对 wheel 与 sdist 均通过；许可证按 PEP 639 渲染（`License-Expression: Apache-2.0` 与 `License-File: LICENSE`/`NOTICE`），构建元数据版本为 2.5。
+
+### 变更
+
+- `speech_chars_per_second`、`voice`、`say_voice`、`subtitle_max_chars` 与 `subtitle_font` 在 `Settings` 和 `config.example.toml` 中的默认值改为 `0` / 空字符串，表示「跟随解析后的语言档案」（中文默认仍解析为 `3.9`、`zf_xiaoxiao`、`Tingting`、`18`、`PingFang SC`，显式配置始终优先）。
 
 ### 修复
 

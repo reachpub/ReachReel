@@ -57,6 +57,9 @@ a profile:
 | `speech_chars_per_second` | Script length target, so English is not sized like Chinese |
 | `subtitle_max_chars` | Line length default, ~18 for CJK, ~42 for whitespace languages |
 | `font_hint` | Font that covers the script |
+| `default_voice` | Default Kokoro voice when `voice` is left empty |
+| `default_say_voice` | Default macOS `say` debug voice when `say_voice` is left empty |
+| `iso639_2` | ISO 639-2 code written to soft-subtitle track metadata (`chi`, `eng`) |
 | `tts` | `{engine: internal code}` for each adapter |
 | `requires` | Optional dependency extra, for example `tts-en` |
 
@@ -64,8 +67,8 @@ Status per release:
 
 | Tag | TTS | Notes |
 |---|---|---|
-| `zh-CN` | supported | Kokoro + `misaki[zh]`, the only language validated end to end so far |
-| `en-US`, `en-GB` | planned | needs a pinned, verified G2P stack; see §5 |
+| `zh-CN` | supported | Kokoro + `misaki[zh]`; validated end to end on real footage |
+| `en-US`, `en-GB` | supported | Kokoro + torch-free `tts-en` extra (`spacy` + `en_core_web_sm` + `espeakng-loader` + `phonemizer-fork`); validated end to end (0.00%–0.51% Whisper round-trip CER, QA 20/20 on Niagara Falls 1080p) |
 | `ja-JP` | planned | `misaki[ja]` |
 | `es-ES`, `fr-FR`, `hi-IN`, `it-IT`, `pt-BR` | planned | espeak-ng G2P |
 
@@ -88,15 +91,18 @@ will use, so a dependency problem shows up before a 40-minute run.
 
 - One optional extra per language group: `tts-zh`, `tts-en`, `tts-ja`. Languages
   served by espeak-ng need no extra.
-- The default install stays torch-free. `misaki[en]` pulls spacy and
-  spacy-curated-transformers, which pull torch (about 600 MB); `misaki[ja]` is
-  lighter but still optional.
+- The default install stays torch-free. `mlx-audio`'s `KokoroPipeline` runs
+  English G2P with `trf=False` (`en_core_web_sm` + `EspeakFallback`), so the
+  `tts-en` extra installs only `spacy`, `num2words`, `espeakng-loader`, and
+  `phonemizer-fork` — skipping `spacy-curated-transformers` and the ~600 MB
+  `torch` download. Run `python -m spacy download en_core_web_sm` once after
+  installing `reachreel[tts-en]`.
 - A language is only marked supported after §6 passes on the pinned versions. A
-  measured example of why: with numpy 2.5 and `misaki[en]`, English synthesis in
-  this environment produced either correct audio or
-  `ValueError: Only length-1 arrays can be converted to Python scalars`,
-  depending on which spacy model was installed at the time, while Chinese kept
-  working. Intermittent dependency state is not "supported".
+  measured example of why: with numpy 2.5 and `misaki[en]`, pulling the
+  transformer spacy model (`en_core_web_trf`) caused intermittent
+  `ValueError: Only length-1 arrays can be converted to Python scalars`, while
+  the non-transformer `en_core_web_sm` stack stayed stable across both `en-US`
+  and `en-GB`. Intermittent dependency state is not "supported".
 
 ## 6. Gate for declaring a language supported
 

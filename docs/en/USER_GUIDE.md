@@ -248,9 +248,9 @@ reachreel run VIDEO [options]
 | `--bgm-dir DIR` | `bgm` | BGM directory |
 | `--bgm-fade N` | `2.0` | Fade the BGM out over the final N seconds |
 | `--no-bgm` | Off | Do not mix BGM |
-| `--voice NAME` | `zf_xiaoxiao` | Kokoro Chinese voice |
+| `--voice NAME` | Follows language | Kokoro voice (`zf_xiaoxiao`, `af_heart`, `bf_emma`, ...) |
 | `--tts ENGINE` | `kokoro` | `kokoro` or `say` (for debugging) |
-| `--tts-language TAG` | Follows content language | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`); the voice must match it. Only `zh-CN` is validated today |
+| `--tts-language TAG` | Follows content language | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`, `en-GB`); the voice must match it |
 | `--vlm-model NAME` | `qwen3-vl:8b-instruct` | Visual understanding model |
 | `--llm-model NAME` | `qwen3:30b-instruct` | Script-writing model |
 | `--whisper-model NAME` | `mlx-community/whisper-large-v3-turbo` | Subtitle model |
@@ -266,7 +266,7 @@ reachreel run VIDEO [options]
 | `--height N` | Source resolution | Output height |
 | `--fps N` | Source frame rate | Output frame rate |
 | `--subtitle-size N` | `48` | Subtitle font size (output pixels) |
-| `--subtitle-chars N` | `18` | Maximum characters per line |
+| `--subtitle-chars N` | Follows language (`18` zh / `42` en) | Maximum characters per line |
 | `--subtitle-preset NAME` | Empty | `douyin` / `reels` / `shorts` / `landscape` safe-area preset; overrides the margins |
 | `--subtitle-render MODE` | `outline` | `outline`: white text + black stroke + soft shadow; `box`: translucent black box (older look, hides more video); `none`: plain white text |
 | `--subtitle-outline X` | `0` | Stroke width in output pixels (`outline` mode); `0` = auto (about 6% of the font size) |
@@ -303,6 +303,11 @@ reachreel run video.mp4 --workdir output/xxx --review-script
 # edit output/xxx/script.json, then:
 reachreel tts output/xxx
 reachreel subtitle output/xxx && reachreel mix output/xxx && reachreel render output/xxx
+
+# English narration, voiceover, and subtitles (requires the tts-en extra + en_core_web_sm)
+reachreel run video.mp4 --content-language en --height 1080 --fps 30
+# British English voiceover
+reachreel run video.mp4 --content-language en --tts-language en-GB --voice bf_emma
 ```
 
 Available `--only` stages: `probe`, `vlm` (alias `analyze`), `script`, `tts`, `subtitles` (alias `subtitle`), `mix`, `render`, `qa`. Selected stages are redone proactively; unselected stages are left untouched. If a required intermediate file is missing, the command prints an actionable next step.

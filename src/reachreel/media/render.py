@@ -38,7 +38,7 @@ def subtitle_style(settings: Settings) -> str:
     margin_v, margin_l, margin_r = subtitle_margins(settings)
     border_style, outline, shadow = subtitle_border(settings, None)
     return (
-        f"FontName={settings.subtitle_font},"
+        f"FontName={settings.resolved_subtitle_font()},"
         f"FontSize={settings.subtitle_size},"
         "PrimaryColour=&H00FFFFFF,"
         "BackColour=&H80000000,"
@@ -52,6 +52,11 @@ def subtitle_style(settings: Settings) -> str:
         f"MarginR={margin_r},"
         "WrapStyle=2"
     )
+
+
+def subtitle_track_language(settings: Settings) -> str:
+    """ISO 639-2 code written to soft-subtitle track metadata."""
+    return settings.content_profile().iso639_2 or "und"
 
 
 def unscaled_source_warning(info, settings: Settings) -> str | None:
@@ -209,7 +214,7 @@ def render(
             "-c:s",
             "mov_text",
             "-metadata:s:s:0",
-            "language=chi",
+            f"language={subtitle_track_language(settings)}",
             "-t",
             f"{duration:.3f}",
             "-movflags",

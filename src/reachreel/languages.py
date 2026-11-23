@@ -9,6 +9,7 @@ declared so the error message can list them instead of silently falling back.
 """
 from __future__ import annotations
 
+import importlib.util
 import re
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -43,6 +44,11 @@ class LanguageProfile:
     speech_chars_per_second: float
     subtitle_max_chars: int
     font_hint: str
+    # Default voices used when the user does not set `voice` / `say_voice`.
+    default_voice: str = ""
+    default_say_voice: str = ""
+    # ISO 639-2 code written to soft-subtitle track metadata (e.g. chi / eng).
+    iso639_2: str = ""
     # Engine code per adapter. Keys match `Settings.tts_engine` values.
     tts: dict[str, str] = field(default_factory=dict)
     # Optional dependency extra that provides the G2P backend.
@@ -58,6 +64,9 @@ PROFILES: dict[str, LanguageProfile] = {
         speech_chars_per_second=3.9,
         subtitle_max_chars=18,
         font_hint="PingFang SC",
+        default_voice="zf_xiaoxiao",
+        default_say_voice="Tingting",
+        iso639_2="chi",
         tts={"kokoro": "z"},
         requires="tts-zh",
         notes="misaki[zh]; validated end to end on real footage",
@@ -65,24 +74,30 @@ PROFILES: dict[str, LanguageProfile] = {
     "en-US": LanguageProfile(
         tag="en-US",
         primary="en",
-        status=PLANNED,
+        status=SUPPORTED,
         speech_chars_per_second=14.5,
         subtitle_max_chars=42,
         font_hint="Helvetica Neue",
+        default_voice="af_heart",
+        default_say_voice="Samantha",
+        iso639_2="eng",
         tts={"kokoro": "a"},
         requires="tts-en",
-        notes="misaki[en] pulls spacy and torch; not validated yet",
+        notes="spacy (en_core_web_sm) + espeak-ng fallback; validated end to end",
     ),
     "en-GB": LanguageProfile(
         tag="en-GB",
         primary="en",
-        status=PLANNED,
+        status=SUPPORTED,
         speech_chars_per_second=14.5,
         subtitle_max_chars=42,
         font_hint="Helvetica Neue",
+        default_voice="bf_emma",
+        default_say_voice="Daniel",
+        iso639_2="eng",
         tts={"kokoro": "b"},
         requires="tts-en",
-        notes="misaki[en] pulls spacy and torch; not validated yet",
+        notes="spacy (en_core_web_sm) + espeak-ng fallback; validated end to end",
     ),
     "ja-JP": LanguageProfile(
         tag="ja-JP",
@@ -91,6 +106,9 @@ PROFILES: dict[str, LanguageProfile] = {
         speech_chars_per_second=6.5,
         subtitle_max_chars=16,
         font_hint="Hiragino Sans",
+        default_voice="jf_alpha",
+        default_say_voice="Kyoko",
+        iso639_2="jpn",
         tts={"kokoro": "j"},
         requires="tts-ja",
     ),
@@ -101,6 +119,7 @@ PROFILES: dict[str, LanguageProfile] = {
         speech_chars_per_second=13.0,
         subtitle_max_chars=38,
         font_hint="Helvetica Neue",
+        iso639_2="spa",
         tts={"kokoro": "e"},
     ),
     "fr-FR": LanguageProfile(
@@ -110,6 +129,7 @@ PROFILES: dict[str, LanguageProfile] = {
         speech_chars_per_second=13.0,
         subtitle_max_chars=38,
         font_hint="Helvetica Neue",
+        iso639_2="fra",
         tts={"kokoro": "f"},
     ),
     "hi-IN": LanguageProfile(
@@ -119,6 +139,7 @@ PROFILES: dict[str, LanguageProfile] = {
         speech_chars_per_second=9.0,
         subtitle_max_chars=32,
         font_hint="Kohinoor Devanagari",
+        iso639_2="hin",
         tts={"kokoro": "h"},
     ),
     "it-IT": LanguageProfile(
@@ -128,6 +149,7 @@ PROFILES: dict[str, LanguageProfile] = {
         speech_chars_per_second=13.0,
         subtitle_max_chars=38,
         font_hint="Helvetica Neue",
+        iso639_2="ita",
         tts={"kokoro": "i"},
     ),
     "pt-BR": LanguageProfile(
@@ -137,6 +159,7 @@ PROFILES: dict[str, LanguageProfile] = {
         speech_chars_per_second=13.0,
         subtitle_max_chars=38,
         font_hint="Helvetica Neue",
+        iso639_2="por",
         tts={"kokoro": "p"},
     ),
 }
@@ -283,3 +306,43 @@ def supported_tags() -> tuple[str, ...]:
 @lru_cache(maxsize=1)
 def planned_tags() -> tuple[str, ...]:
     return tuple(sorted(tag for tag, profile in PROFILES.items() if profile.status == PLANNED))
+
+
+def check_tts_dependencies(
+    profile: LanguageProfile,
+    engine: str = "kokoro",
+    *,
+    find_spec=importlib.util.find_spec,
+) -> tuple[bool, str]:
+    """Check whether the G2P stack for ``profile`` is installed.
+
+    Returns ``(ok, detail)`` so ``doctor`` and the TTS adapter report the exact
+    same missing packages and install command.
+    """
+    if engine != "kokoro":
+        return True, engine
+    if profile.primary == "zh":
+        missing = [mod for mod in ("misaki", "pypinyin", "jieba", "cn2an") if find_spec(mod) is None]
+        if missing:
+            return (
+                False,
+                f"missing {', '.join(missing)} (install: uv pip install 'reachreel[tts-zh]')",
+            )
+        return True, "misaki[zh]"
+    if profile.primary == "en":
+        pkg_mods = ("misaki", "spacy", "num2words", "espeakng_loader", "phonemizer")
+        missing_pkgs = [mod for mod in pkg_mods if find_spec(mod) is None]
+        missing_model = find_spec("en_core_web_sm") is None
+        if not missing_pkgs and not missing_model:
+            return True, "misaki + spacy (en_core_web_sm) + espeak-ng"
+        hints: list[str] = []
+        if missing_pkgs:
+            hints.append(
+                f"missing {', '.join(missing_pkgs)} (install: uv pip install 'reachreel[tts-en]')"
+            )
+        if missing_model:
+            hints.append("missing en_core_web_sm (run: python -m spacy download en_core_web_sm)")
+        return False, "; ".join(hints)
+    if find_spec("misaki") is None:
+        return False, "missing misaki"
+    return True, "misaki"

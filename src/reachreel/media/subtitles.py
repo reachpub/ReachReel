@@ -59,26 +59,79 @@ def _merge_orphans(chunks: list[str]) -> list[str]:
     return cleaned
 
 
-def _split_words(text: str, max_chars: int) -> list[str]:
-    """Pack whitespace-separated text without breaking words."""
+def _wrap_clause_words(text: str, max_chars: int) -> list[str]:
+    """Wrap one whitespace-separated clause without breaking words.
+
+    When a clause needs two lines and greedy packing leaves a tiny trailing
+    orphan, rebalance near the midpoint while respecting ``max_chars``.
+    """
+    words = [word for word in text.split(" ") if word]
+    if not words:
+        return []
     chunks: list[str] = []
     current = ""
-    for word in text.split(" "):
-        if not word:
-            continue
+    for word in words:
         candidate = f"{current} {word}" if current else word
         if len(candidate) <= max_chars:
             current = candidate
             continue
         if current:
             chunks.append(current)
+            current = ""
         while len(word) > max_chars:
             chunks.append(word[:max_chars])
             word = word[max_chars:]
         current = word
     if current:
         chunks.append(current)
-    return _merge_orphans(chunks)
+
+    # Rebalance a 2-line wrap when greedy packing leaves a lonely short tail.
+    if (
+        len(chunks) == 2
+        and all(len(word) <= max_chars for word in words)
+        and (len(chunks[1]) < max(8, max_chars // 4) or " " not in chunks[1])
+    ):
+        best: tuple[int, str, str] | None = None
+        for cut in range(1, len(words)):
+            left = " ".join(words[:cut])
+            right = " ".join(words[cut:])
+            if len(left) <= max_chars and len(right) <= max_chars:
+                diff = abs(len(left) - len(right))
+                if best is None or diff < best[0]:
+                    best = (diff, left, right)
+        if best is not None:
+            return [best[1], best[2]]
+    return chunks
+
+
+def _split_words(text: str, max_chars: int) -> list[str]:
+    """Split whitespace-separated text along sentence/clause breaks and words."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    units: list[str] = []
+    for sentence in sentences:
+        if len(sentence) <= max_chars:
+            units.append(sentence)
+        else:
+            clauses = [c.strip() for c in re.split(r"(?<=[;,—:])\s+", sentence) if c.strip()]
+            units.extend(clauses)
+
+    lines: list[str] = []
+    current = ""
+    for unit in units:
+        candidate = f"{current} {unit}" if current else unit
+        if len(candidate) <= max_chars:
+            current = candidate
+            continue
+        if current:
+            lines.append(current)
+            current = ""
+        if len(unit) <= max_chars:
+            current = unit
+        else:
+            lines.extend(_wrap_clause_words(unit, max_chars))
+    if current:
+        lines.append(current)
+    return lines
 
 
 def _preferred_cut(text: str, max_chars: int) -> int:
@@ -332,7 +385,7 @@ def write_ass(
     height = max(2, int(height))
     size = max(1, int(settings.subtitle_size))
     margin_v, margin_l, margin_r = subtitle_margins(settings)
-    font = (settings.subtitle_font or "Sans").replace(",", " ")
+    font = (settings.resolved_subtitle_font() or "Sans").replace(",", " ")
     border_style, outline, shadow = subtitle_border(settings, height)
     header = [
         "[Script Info]",
@@ -465,6 +518,7 @@ def build_subtitles(
     asr_engine: str = "mlx-whisper",
     flags: list[QualityFlag] | None = None,
 ) -> list[Cue]:
+    max_chars = settings.resolved_subtitle_max_chars()
     result = None
     if asr_engine != "none":
         result = transcribe_with_mlx_whisper(
@@ -483,7 +537,7 @@ def build_subtitles(
     if result and settings.subtitle_text == "asr":
         cues = cues_from_asr(
             result,
-            max_chars=settings.subtitle_max_chars,
+            max_chars=max_chars,
             max_lines=settings.subtitle_max_lines,
             max_seconds=settings.subtitle_max_seconds,
         )
@@ -503,7 +557,7 @@ def build_subtitles(
         windows = _speech_windows(result, segments)
         cues = cues_from_timeline(
             segments,
-            max_chars=settings.subtitle_max_chars,
+            max_chars=max_chars,
             max_lines=settings.subtitle_max_lines,
             max_seconds=settings.subtitle_max_seconds,
             speech_windows=windows,
@@ -514,7 +568,7 @@ def build_subtitles(
             return cues
     cues = cues_from_timeline(
         segments,
-        max_chars=settings.subtitle_max_chars,
+        max_chars=max_chars,
         max_lines=settings.subtitle_max_lines,
         max_seconds=settings.subtitle_max_seconds,
     )

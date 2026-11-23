@@ -125,6 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     def common(p: argparse.ArgumentParser) -> None:
         p.add_argument("--config", help=t("cli.config"))
+        p.add_argument(
+            "--content-language",
+            choices=["zh", "en"],
+            default=argparse.SUPPRESS,
+            help=t("cli.content_language"),
+        )
         p.add_argument("--ollama-url", default=None)
         p.add_argument("--vlm-model", default=None)
         p.add_argument("--llm-model", default=None)
@@ -348,6 +354,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     doc = sub.add_parser("doctor", help=t("cli.doctor"))
     doc.add_argument("--config", default=None)
+    doc.add_argument(
+        "--content-language",
+        choices=["zh", "en"],
+        default=argparse.SUPPRESS,
+        help=t("cli.content_language"),
+    )
+    doc.add_argument("--tts", choices=["kokoro", "say"], default=None)
+    doc.add_argument("--tts-language", default=None, help=t("cli.tts_language"))
+    doc.add_argument("--voice", default=None, help=t("cli.voice"))
     doc.add_argument("--json", action="store_true", help=t("cli.json"))
 
     licenses = sub.add_parser("licenses", help=t("cli.licenses"))
@@ -388,7 +403,7 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(args.verbose)
 
     if args.command == "doctor":
-        settings = Settings.load(Path(args.config) if args.config else None)
+        settings = _settings(args)
         return doctor(settings, as_json=args.json)
 
     if args.command == "run":
@@ -516,12 +531,13 @@ def main(argv: list[str] | None = None) -> int:
                 "output_height": settings.output_height,
                 "output_fps": settings.output_fps,
                 "crf": settings.crf,
-                "subtitle_font": settings.subtitle_font,
+                "subtitle_font": settings.resolved_subtitle_font(),
                 "subtitle_size": settings.subtitle_size,
                 "subtitle_preset": settings.subtitle_preset,
                 "subtitle_margin_v": settings.subtitle_margin_v,
                 "subtitle_margin_left": settings.subtitle_margin_left,
                 "subtitle_margin_right": settings.subtitle_margin_right,
+                "subtitle_max_chars": settings.resolved_subtitle_max_chars(),
                 "subtitle_size_unit": "px",
                 "subtitle_layout": "ass",
             }

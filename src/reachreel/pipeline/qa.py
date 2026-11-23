@@ -23,6 +23,7 @@ from ..core.util import (
 )
 from ..domain.models import QualityFlag, merge_quality_flags
 from ..i18n import t
+from ..languages import PROFILES, profile_for
 from ..media.subtitles import SUBTITLE_PRESETS
 
 PASS = "pass"
@@ -30,7 +31,7 @@ WARN = "warn"
 FAIL = "fail"
 
 TIMECODE_RE = re.compile(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})")
-PUNCT_RE = re.compile(r"[\s，。！？；：、,.!?;:\"'“”‘’（）()《》〈〉【】…—\-~～]")
+PUNCT_RE = re.compile(r"[\s，。！？；：、,.!?;:\"'“”‘’（）()《》〈〉【】…—–\-~～]")
 
 
 @dataclass(frozen=True)
@@ -347,7 +348,8 @@ def _subtitle_style(settings: dict[str, Any]) -> str:
     from ..media.render import subtitle_style
 
     values = Settings()
-    values.subtitle_font = str(settings.get("subtitle_font") or "PingFang SC")
+    values.content_language = str(settings.get("content_language") or "zh")
+    values.subtitle_font = str(settings.get("subtitle_font") or "")
     values.subtitle_size = int(settings.get("subtitle_size", 18))
     values.subtitle_margin_v = int(settings.get("subtitle_margin_v", 36))
     values.subtitle_margin_left = int(settings.get("subtitle_margin_left", 50))
@@ -877,7 +879,12 @@ def run_qa(
     elif not cues:
         _add(checks, "subtitle_cues", FAIL, t("qa.subtitle_no_cues"))
     else:
-        max_chars_limit = int(settings.get("subtitle_max_chars", 18))
+        configured_chars = int(settings.get("subtitle_max_chars") or 0)
+        if configured_chars > 0:
+            max_chars_limit = configured_chars
+        else:
+            profile = profile_for(str(settings.get("content_language") or "zh")) or PROFILES["zh-CN"]
+            max_chars_limit = profile.subtitle_max_chars
         max_lines_limit = int(settings.get("subtitle_max_lines", 2))
         max_seconds_limit = float(settings.get("subtitle_max_seconds", 6.0))
         max_line_len = max(len(line) for cue in cues for line in cue["lines"])

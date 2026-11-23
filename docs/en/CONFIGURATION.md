@@ -95,7 +95,7 @@ Tuning suggestions:
 |---|---|---|
 | `style` | Empty = `prompts/<lang>/style.txt` | Narration style hint; empty uses the language default |
 | `brief` | Empty | Background such as shooting location, people, and activities; strongly recommended |
-| `speech_chars_per_second` | `3.9` | Speech-rate estimate for the target character count; use about `14.5` for English |
+| `speech_chars_per_second` | `0.0` | Speech-rate estimate for the target character count; `0` follows the content language (`3.9` for `zh-CN`, `14.5` for `en`) |
 | `narration_density` | `0.62` | Narration density 0.2–1.0; 0.4 is more vlog-like, 0.75 is more documentary-like |
 | `min_gap_seconds` | `0.28` | Minimum gap between narration segments |
 | `start_offset` | `0.7` | Earliest start time for the first narration segment |
@@ -117,13 +117,13 @@ For example, 90 seconds at 3.9 characters/second and 0.5 density → about 175 c
 | Field | Default | Description |
 |---|---|---|
 | `tts_engine` | `kokoro` | `kokoro` or `say` (for macOS debugging) |
-| `tts_language` | `""` | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`, ...). Empty follows `content_language`. Engine codes stay internal, and a voice whose language disagrees is rejected; see [LANGUAGES.md](LANGUAGES.md). Only `zh-CN` is validated for `kokoro` so far |
+| `tts_language` | `""` | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`, `en-GB`, ...). Empty follows `content_language`. Engine codes stay internal, and a voice whose language disagrees is rejected; see [LANGUAGES.md](LANGUAGES.md). `zh-CN`, `en-US`, and `en-GB` are validated for `kokoro` |
 | `kokoro_model` | `mlx-community/Kokoro-82M-4bit` | Kokoro MLX model |
-| `voice` | `zf_xiaoxiao` | Kokoro voice; its name carries the language (`zf_` = Mandarin, `af_` = American English, `bf_` = British English) |
+| `voice` | `""` | Kokoro voice; empty follows the resolved language (`zf_xiaoxiao` for `zh-CN`, `af_heart` for `en-US`, `bf_emma` for `en-GB`). The prefix carries the language (`zf_`/`zm_` Mandarin, `af_`/`am_` American English, `bf_`/`bm_` British English) |
 | `tts_speed` | `1.0` | Base speech rate; 1.0 is normal, >1 is faster |
-| `say_voice` | `Tingting` | Voice for the `say` engine |
+| `say_voice` | `""` | Voice for the `say` engine; empty follows the resolved language (`Tingting`, `Samantha`, `Daniel`) |
 
-Kokoro Chinese voices:
+Kokoro Chinese voices (`zh-CN`):
 
 | Voice | Gender / style |
 |---|---|
@@ -136,6 +136,17 @@ Kokoro Chinese voices:
 | `zm_yunxia` | Male, milder |
 | `zm_yunyang` | Male, brighter |
 
+Kokoro English voices (requires `uv pip install 'reachreel[tts-en]'` and `python -m spacy download en_core_web_sm`):
+
+| Voice | Accent / gender |
+|---|---|
+| `af_heart` | `en-US`, female, default |
+| `af_bella` / `af_sarah` / `af_nova` | `en-US`, female |
+| `am_michael` / `am_adam` / `am_liam` | `en-US`, male |
+| `bf_emma` | `en-GB`, female, default |
+| `bf_alice` / `bf_isabella` / `bf_lily` | `en-GB`, female |
+| `bm_george` / `bm_daniel` / `bm_lewis` | `en-GB`, male |
+
 > `say` is only for quickly validating the pipeline when Kokoro is not installed properly; it is not recommended as a production voice.
 
 ---
@@ -147,10 +158,10 @@ Kokoro Chinese voices:
 | `whisper_model` | `mlx-community/whisper-large-v3-turbo` | mlx-whisper model |
 | `asr_language` | `""` | Whisper recognition hint; empty follows the primary subtag of `content_language` |
 | `subtitle_text` | `script` | `script`: script text + Whisper timestamps; `asr`: use Whisper text directly |
-| `subtitle_max_chars` | `18` | Maximum characters per line |
+| `subtitle_max_chars` | `0` | Maximum characters per line; `0` follows the content language (`18` for `zh-CN`, `42` for `en`) |
 | `subtitle_max_lines` | `2` | Maximum lines per subtitle cue |
 | `subtitle_max_seconds` | `6.0` | Maximum display time for a single subtitle cue |
-| `subtitle_font` | `PingFang SC` | Font |
+| `subtitle_font` | `""` | Font; empty follows the content language (`PingFang SC` for `zh-CN`, `Helvetica Neue` for `en`) |
 | `subtitle_size` | `48` | Subtitle font size (output pixels) |
 | `subtitle_preset` | `""` | Platform safe-area preset: `douyin` / `reels` / `shorts` / `landscape` |
 | `subtitle_render` | `outline` | `outline`: white text with a black stroke and soft shadow (covers only the glyph edges); `box`: white text on a translucent black box (older behaviour, hides more of the frame); `none`: plain white text without stroke or shadow (bright footage can wash it out) |

@@ -1,0 +1,82 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "scripts/mkdocs_hooks.py"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "scripts/mkdocs_hooks.py"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install MkDocs dependencies
+        run: |
+          uv venv --python 3.12
+          uv pip install --python .venv/bin/python --no-deps -e .
+          uv pip install --python .venv/bin/python 'mkdocs-material>=9.5' 'mkdocs-static-i18n>=1.2'
+
+      - name: Prepare index pages from README
+        run: |
+          cp README.md docs/en/index.md
+          cp README.zh-CN.md docs/zh-CN/index.md
+          sed -i \
+            -e 's|(docs/en/|(|g' \
+            -e 's|(docs/GLOSSARY.md)|(GLOSSARY.md)|g' \
+            -e 's|(docs/README.md)|(https://github.com/reachpub/ReachReel/blob/main/docs/README.md)|g' \
+            -e 's|(CHANGELOG.md)|(https://github.com/reachpub/ReachReel/blob/main/CHANGELOG.md)|g' \
+            docs/en/index.md
+          sed -i \
+            -e 's|(docs/zh-CN/|(|g' \
+            -e 's|(docs/GLOSSARY.md)|(GLOSSARY.md)|g' \
+            -e 's|(docs/README.md)|(https://github.com/reachpub/ReachReel/blob/main/docs/README.md)|g' \
+            -e 's|(CHANGELOG.zh-CN.md)|(https://github.com/reachpub/ReachReel/blob/main/CHANGELOG.zh-CN.md)|g' \
+            docs/zh-CN/index.md
+
+      - name: Build site
+        env:
+          NO_MKDOCS_2_WARNING: "1"
+        run: .venv/bin/python -m mkdocs build --strict
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

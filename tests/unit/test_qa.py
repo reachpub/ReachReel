@@ -111,6 +111,14 @@ class QATests(unittest.TestCase):
         )
         self.assertEqual(preset.subtitle_preset, "douyin")
         self.assertTrue(parser.parse_args(["doctor", "--json"]).json)
+        doc_en = parser.parse_args(
+            ["doctor", "--content-language", "en", "--tts-language", "en-GB", "--voice", "bf_emma"]
+        )
+        self.assertEqual(doc_en.content_language, "en")
+        self.assertEqual(doc_en.tts_language, "en-GB")
+        self.assertEqual(doc_en.voice, "bf_emma")
+        run_en = parser.parse_args(["run", "/tmp/video.mp4", "--content-language", "en"])
+        self.assertEqual(run_en.content_language, "en")
         review = parser.parse_args(["run", "/tmp/video.mp4", "--review-script"])
         self.assertTrue(review.review_script)
         mix = parser.parse_args(["mix", "/tmp/workdir", "--bgm-fade", "3"])

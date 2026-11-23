@@ -5,6 +5,7 @@ from reachreel.languages import (
     PLANNED,
     PROFILES,
     SUPPORTED,
+    check_tts_dependencies,
     normalize_tag,
     planned_tags,
     profile_for,
@@ -41,10 +42,16 @@ class LanguageRegistryTests(unittest.TestCase):
             if profile.status == SUPPORTED:
                 self.assertTrue(profile.tts, f"{tag} needs an engine code")
 
-    def test_only_chinese_is_supported_today(self):
-        self.assertEqual(supported_tags(), ("zh-CN",))
-        self.assertIn("en-US", planned_tags())
+    def test_supported_and_planned_tags(self):
+        self.assertEqual(supported_tags(), ("en-GB", "en-US", "zh-CN"))
         self.assertIn("ja-JP", planned_tags())
+        self.assertNotIn("en-US", planned_tags())
+        self.assertNotIn("en-GB", planned_tags())
+
+    def test_supported_english_tags_map_to_kokoro_codes(self):
+        self.assertEqual(require_tts(profile_for("zh-CN"), "kokoro"), "z")
+        self.assertEqual(require_tts(profile_for("en-US"), "kokoro"), "a")
+        self.assertEqual(require_tts(profile_for("en-GB"), "kokoro"), "b")
 
     def test_voice_language_from_name(self):
         self.assertEqual(voice_language("af_heart"), "en-US")
@@ -68,9 +75,10 @@ class LanguageRegistryTests(unittest.TestCase):
 
     def test_planned_language_is_rejected_for_tts(self):
         with self.assertRaises(ValueError) as ctx:
-            require_tts(profile_for("en-US"), "kokoro")
-        self.assertIn("does not support en-US yet", str(ctx.exception))
-        self.assertIn("misaki[en]", str(ctx.exception))
+            require_tts(profile_for("ja-JP"), "kokoro")
+        self.assertIn("does not support ja-JP yet", str(ctx.exception))
+        self.assertIn("en-US", str(ctx.exception))
+        self.assertIn("zh-CN", str(ctx.exception))
 
     def test_engine_without_code_is_rejected(self):
         with self.assertRaises(ValueError):
@@ -82,9 +90,81 @@ class LanguageRegistryTests(unittest.TestCase):
         message = str(ctx.exception)
         self.assertIn("af_heart", message)
         self.assertIn("en-US", message)
-        self.assertIn("planned", message)
-        # The matching voice passes.
+        self.assertIn("zh-CN", message)
+
+        with self.assertRaises(ValueError) as ctx:
+            require_voice_match(profile_for("en-US"), "zf_xiaoxiao")
+        self.assertIn("zf_xiaoxiao", str(ctx.exception))
+
+        # American vs British accent mismatch is also rejected.
+        with self.assertRaises(ValueError) as ctx:
+            require_voice_match(profile_for("en-GB"), "af_heart")
+        self.assertIn("en-GB", str(ctx.exception))
+
+        # A voice belonging to a planned language notes that status.
+        with self.assertRaises(ValueError) as ctx:
+            require_voice_match(profile_for("en-US"), "jf_alpha")
+        self.assertIn("planned", str(ctx.exception))
+
+        # Matching voices pass.
         require_voice_match(profile_for("zh-CN"), "zf_xiaoxiao")
+        require_voice_match(profile_for("en-US"), "af_heart")
+        require_voice_match(profile_for("en-GB"), "bf_emma")
+
+    def test_language_aware_settings_defaults(self):
+        zh = Settings()
+        self.assertEqual(zh.resolved_speech_chars_per_second(), 3.9)
+        self.assertEqual(zh.resolved_voice(), "zf_xiaoxiao")
+        self.assertEqual(zh.resolved_say_voice(), "Tingting")
+        self.assertEqual(zh.resolved_subtitle_max_chars(), 18)
+        self.assertEqual(zh.resolved_subtitle_font(), "PingFang SC")
+        self.assertEqual(zh.resolved_asr_language(), "zh")
+
+        en_us = Settings(content_language="en")
+        self.assertEqual(en_us.resolved_speech_chars_per_second(), 14.5)
+        self.assertEqual(en_us.resolved_voice(), "af_heart")
+        self.assertEqual(en_us.resolved_say_voice(), "Samantha")
+        self.assertEqual(en_us.resolved_subtitle_max_chars(), 42)
+        self.assertEqual(en_us.resolved_subtitle_font(), "Helvetica Neue")
+        self.assertEqual(en_us.resolved_asr_language(), "en")
+
+        en_gb = Settings(content_language="en", tts_language="en-GB")
+        self.assertEqual(en_gb.resolved_voice(), "bf_emma")
+        self.assertEqual(en_gb.resolved_say_voice(), "Daniel")
+
+        custom = Settings(
+            content_language="en",
+            voice="am_michael",
+            subtitle_max_chars=36,
+            subtitle_font="Inter",
+            speech_chars_per_second=13.0,
+        )
+        self.assertEqual(custom.resolved_voice(), "am_michael")
+        self.assertEqual(custom.resolved_subtitle_max_chars(), 36)
+        self.assertEqual(custom.resolved_subtitle_font(), "Inter")
+        self.assertEqual(custom.resolved_speech_chars_per_second(), 13.0)
+
+    def test_check_tts_dependencies_reports_missing_english_stack(self):
+        en_us = profile_for("en-US")
+        ok, detail = check_tts_dependencies(en_us, "kokoro", find_spec=lambda _name: object())
+        self.assertTrue(ok)
+        self.assertIn("en_core_web_sm", detail)
+
+        ok, detail = check_tts_dependencies(
+            en_us,
+            "kokoro",
+            find_spec=lambda name: None if name == "en_core_web_sm" else object(),
+        )
+        self.assertFalse(ok)
+        self.assertIn("spacy download en_core_web_sm", detail)
+
+        ok, detail = check_tts_dependencies(
+            en_us,
+            "kokoro",
+            find_spec=lambda name: None if name in {"spacy", "num2words"} else object(),
+        )
+        self.assertFalse(ok)
+        self.assertIn("tts-en", detail)
 
     def test_asr_language_follows_content(self):
         self.assertEqual(resolve_asr_language("", "zh"), "zh")
@@ -108,11 +188,35 @@ class LanguageRegistryTests(unittest.TestCase):
         self.assertEqual(checks["language.tts"]["value"], "zh-CN -> kokoro z")
         self.assertTrue(checks["language.tts"]["ok"])
 
+    def test_doctor_reports_english_axes_and_catches_voice_mismatch(self):
+        from reachreel.pipeline.orchestrator import doctor_report
+
+        en_us = doctor_report(Settings(content_language="en", ollama_url="http://127.0.0.1:1"))
+        checks = {check["id"]: check for check in en_us["checks"]}
+        self.assertEqual(checks["language.tts"]["value"], "en-US -> kokoro a")
+        self.assertTrue(checks["language.tts"]["ok"])
+        self.assertEqual(checks["language.voice"]["value"], "af_heart")
+
+        en_gb = doctor_report(
+            Settings(content_language="en", tts_language="en-GB", ollama_url="http://127.0.0.1:1")
+        )
+        gb_checks = {check["id"]: check for check in en_gb["checks"]}
+        self.assertEqual(gb_checks["language.tts"]["value"], "en-GB -> kokoro b")
+        self.assertTrue(gb_checks["language.tts"]["ok"])
+        self.assertEqual(gb_checks["language.voice"]["value"], "bf_emma")
+
+        mismatch = doctor_report(
+            Settings(content_language="en", voice="zf_xiaoxiao", ollama_url="http://127.0.0.1:1")
+        )
+        mismatch_checks = {check["id"]: check for check in mismatch["checks"]}
+        self.assertFalse(mismatch_checks["language.tts"]["ok"])
+        self.assertIn("zf_xiaoxiao", mismatch_checks["language.tts"]["value"])
+
     def test_doctor_fails_planned_tts_language(self):
         from reachreel.pipeline.orchestrator import doctor_report
 
         report = doctor_report(
-            Settings(content_language="en", ollama_url="http://127.0.0.1:1")
+            Settings(tts_language="ja-JP", ollama_url="http://127.0.0.1:1")
         )
         checks = {check["id"]: check for check in report["checks"]}
         self.assertFalse(checks["language.tts"]["ok"])

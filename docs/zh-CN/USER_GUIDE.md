@@ -248,9 +248,9 @@ reachreel run VIDEO [options]
 | `--bgm-dir DIR` | `bgm` | BGM 目录 |
 | `--bgm-fade N` | `2.0` | BGM 结尾淡出秒数 |
 | `--no-bgm` | 关 | 不混 BGM |
-| `--voice NAME` | `zf_xiaoxiao` | Kokoro 中文音色 |
+| `--voice NAME` | 跟随语言 | Kokoro 音色（`zf_xiaoxiao`、`af_heart`、`bf_emma` 等） |
 | `--tts ENGINE` | `kokoro` | `kokoro` 或 `say`（调试用） |
-| `--tts-language TAG` | 跟随成片语言 | 配音语言，BCP 47 标签（`zh-CN`、`en-US`），音色必须与之一致。目前只验证了 `zh-CN` |
+| `--tts-language TAG` | 跟随成片语言 | 配音语言，BCP 47 标签（`zh-CN`、`en-US`、`en-GB`），音色必须与之一致 |
 | `--vlm-model NAME` | `qwen3-vl:8b-instruct` | 画面理解模型 |
 | `--llm-model NAME` | `qwen3:30b-instruct` | 写稿模型 |
 | `--whisper-model NAME` | `mlx-community/whisper-large-v3-turbo` | 字幕模型 |
@@ -266,7 +266,7 @@ reachreel run VIDEO [options]
 | `--height N` | 原分辨率 | 输出高度 |
 | `--fps N` | 原帧率 | 输出帧率 |
 | `--subtitle-size N` | `48` | 字幕字号（输出像素） |
-| `--subtitle-chars N` | `18` | 每行最多字数 |
+| `--subtitle-chars N` | 跟随语言（中文 `18` / 英文 `42`） | 每行最多字数 |
 | `--subtitle-preset NAME` | 空 | `douyin` / `reels` / `shorts` / `landscape` 安全区预设，覆盖边距 |
 | `--subtitle-render MODE` | `outline` | `outline`：白字 + 黑描边 + 轻微阴影；`box`：半透明黑底色块（旧观感，遮挡更多画面）；`none`：纯白字 |
 | `--subtitle-outline X` | `0` | 描边宽度（输出像素，`outline` 模式），`0` 表示自动，约字号的 6% |
@@ -303,6 +303,11 @@ reachreel run video.mp4 --workdir output/xxx --review-script
 # 编辑 output/xxx/script.json 后：
 reachreel tts output/xxx
 reachreel subtitle output/xxx && reachreel mix output/xxx && reachreel render output/xxx
+
+# 英文旁白、配音与字幕（需先装 tts-en extra 与 en_core_web_sm）
+reachreel run video.mp4 --content-language en --height 1080 --fps 30
+# 英式英语配音
+reachreel run video.mp4 --content-language en --tts-language en-GB --voice bf_emma
 ```
 
 `--only` 的可用阶段：`probe`、`vlm`（别名 `analyze`）、`script`、`tts`、`subtitles`（别名 `subtitle`）、`mix`、`render`、`qa`。选中的阶段会主动重做；未选中的阶段不动。依赖的中间文件不存在时会给出可执行的下一步提示。

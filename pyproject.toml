@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reachreel"
-version = "0.3.0"
+version = "0.4.0"
 description = "Fully local video narration pipeline: Ollama VLM -> script -> Kokoro TTS -> Whisper subtitles -> BGM ducking -> FFmpeg"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
-authors = [{ name = "Tercel" }]
+authors = [{ name = "reachpub" }]
 keywords = [
   "video",
   "narration",
@@ -46,11 +46,30 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Per-language G2P extras (see docs/en/LANGUAGES.md). The default install
+# includes Chinese (`misaki[zh]`) and stays torch-free. `tts-en` installs only
+# the non-transformer English G2P stack used by mlx-audio's KokoroPipeline
+# (trf=False), avoiding spacy-curated-transformers and torch. Also run
+# `python -m spacy download en_core_web_sm` once for the spaCy tagger model.
+tts-zh = [
+  "misaki[zh]>=0.9",
+]
+tts-en = [
+  "spacy>=3.8,<4",
+  "num2words>=0.5",
+  "espeakng-loader>=0.2",
+  "phonemizer-fork>=3.3",
+]
 # Maintainer tooling: `uv pip install -e '.[dev]'`. apdev brings the shared
 # APCore checks (source charset, circular imports) and `apdev release`.
 dev = [
   "apdev[dev]>=0.2.6",
   "pre-commit>=3.5",
+]
+# Documentation site: `uv pip install -e '.[docs]'` -> `mkdocs serve` / `mkdocs build`.
+docs = [
+  "mkdocs-material>=9.5",
+  "mkdocs-static-i18n>=1.2",
 ]
 
 [project.scripts]

@@ -24,10 +24,15 @@ from reachreel.domain.models import (
     merge_quality_flags,
 )
 from reachreel.domain.timeline import place_segments
-from reachreel.engines.tts import _synthesize_with_retries, synthesize_segments
+from reachreel.engines.tts import (
+    KokoroEngine,
+    _split_for_tts,
+    _synthesize_with_retries,
+    synthesize_segments,
+)
 from reachreel.engines.vlm import analyze_scenes
 from reachreel.engines.vlm import settings_key as vlm_settings_key
-from reachreel.generation.script import _extract_json_array
+from reachreel.generation.script import _clean_text, _extract_json_array
 from reachreel.i18n import set_language
 from reachreel.media.audio import (
     _bgm_filter,
@@ -38,7 +43,11 @@ from reachreel.media.audio import (
     load_bgm_catalog,
     mix_filter_graph,
 )
-from reachreel.media.render import output_dimensions, unscaled_source_warning
+from reachreel.media.render import (
+    output_dimensions,
+    subtitle_track_language,
+    unscaled_source_warning,
+)
 from reachreel.media.scenes import display_dimensions, select_representative_frames
 from reachreel.media.subtitles import (
     SUBTITLE_PRESETS,
@@ -572,6 +581,68 @@ class UnitTests(unittest.TestCase):
         self.assertTrue(pieces)
         self.assertTrue(all(len(piece) <= 18 for piece in pieces))
         self.assertEqual(" ".join(pieces).split(), text.split())
+
+    def test_split_text_english_prefers_sentences_and_balances_lines(self):
+        text = "Mist drifts over the gorge. Sunlight breaks across the stone wall."
+        pieces = _split_text(text, 42)
+        self.assertEqual(
+            pieces,
+            ["Mist drifts over the gorge.", "Sunlight breaks across the stone wall."],
+        )
+        # Single-letter words like "a" or "I" must never be glued without a space.
+        short_word_text = "Morning light climbs above a ridge as I walk."
+        short_pieces = _split_text(short_word_text, 28)
+        self.assertTrue(all(len(piece) <= 28 for piece in short_pieces))
+        self.assertEqual(" ".join(short_pieces).split(), short_word_text.split())
+
+    def test_split_for_tts_preserves_english_words(self):
+        paragraph = (
+            "Morning mist lifts from the river as sunlight breaks over the canyon walls. "
+            "At the edge of the gorge, the water drops with a steady roar that you feel "
+            "before you hear. Mist drifts across the stone railing and catches the late "
+            "afternoon light before the wind carries it downstream."
+        )
+        chunks = _split_for_tts(paragraph, primary_language="en")
+        self.assertGreaterEqual(len(chunks), 2)
+        self.assertTrue(all(len(chunk) <= 250 for chunk in chunks))
+        self.assertEqual(" ".join(chunks).split(), paragraph.split())
+
+    def test_write_ass_english_uses_latin_font_hint(self):
+        settings = Settings(content_language="en")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "en.ass"
+            write_ass([Cue(0.0, 2.0, "Hello world.")], path, width=1920, height=1080, settings=settings)
+            text = path.read_text(encoding="utf-8")
+        self.assertIn("Default,Helvetica Neue,48,", text)
+
+    def test_subtitle_track_language_follows_content_language(self):
+        self.assertEqual(subtitle_track_language(Settings(content_language="zh")), "chi")
+        self.assertEqual(subtitle_track_language(Settings(content_language="en")), "eng")
+
+    def test_clean_text_english_preserves_closing_quotes(self):
+        self.assertEqual(_clean_text('He said, "Hold on."', "en"), 'He said, "Hold on."')
+        self.assertEqual(_clean_text("Mist rises over the water", "en"), "Mist rises over the water.")
+
+    def test_kokoro_validates_voice_before_segment_retries(self):
+        settings = Settings(content_language="en", voice="zf_xiaoxiao")
+        with tempfile.TemporaryDirectory() as tmp, self.assertRaises(ValueError) as ctx:
+            synthesize_segments(
+                [NarrationSegment(id=1, scene_ids=[1], text="Hello.")],
+                Path(tmp),
+                settings,
+                retries=2,
+            )
+        self.assertIn("zf_xiaoxiao", str(ctx.exception))
+
+    def test_kokoro_reports_missing_english_g2p_dependencies(self):
+        engine = KokoroEngine(Settings(content_language="en"))
+        profile = engine.language()
+        with patch(
+            "reachreel.engines.tts.check_tts_dependencies",
+            return_value=(False, "missing en_core_web_sm"),
+        ), self.assertRaises(RuntimeError) as ctx:
+            engine._ensure_g2p(profile)
+        self.assertIn("en_core_web_sm", str(ctx.exception))
 
     def test_cue_timing_favours_sentence_pauses(self):
         segments = [

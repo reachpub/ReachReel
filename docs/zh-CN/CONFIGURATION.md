@@ -95,7 +95,7 @@ output_fps = 30
 |---|---|---|
 | `style` | 空 = `prompts/<lang>/style.txt` | 旁白风格提示；留空使用语言默认风格 |
 | `brief` | 空 | 拍摄地、人物、活动等背景；强烈建议填写 |
-| `speech_chars_per_second` | `3.9` | 口播速度估算，用于算目标字数；英文建议约 `14.5` |
+| `speech_chars_per_second` | `0.0` | 口播速度估算，用于算目标字数；`0` 跟随成片语言（`zh-CN` 为 `3.9`，`en` 为 `14.5`） |
 | `narration_density` | `0.62` | 旁白密度 0.2–1.0；0.4 更 Vlog，0.75 更像纪录片 |
 | `min_gap_seconds` | `0.28` | 旁白段之间的最小间隔 |
 | `start_offset` | `0.7` | 第一段旁白最早开始时间 |
@@ -117,13 +117,13 @@ target_chars ≈ duration × speech_chars_per_second × narration_density
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `tts_engine` | `kokoro` | `kokoro` 或 `say`（macOS 调试用） |
-| `tts_language` | `""` | 配音语言，BCP 47 标签（`zh-CN`、`en-US` 等）。留空跟随 `content_language`。引擎内部代码不外露；音色语言与它不一致会直接报错，详见 [LANGUAGES.md](LANGUAGES.md)。目前 `kokoro` 只有 `zh-CN` 通过验证 |
+| `tts_language` | `""` | 配音语言，BCP 47 标签（`zh-CN`、`en-US`、`en-GB` 等）。留空跟随 `content_language`。引擎内部代码不外露；音色语言与它不一致会直接报错，详见 [LANGUAGES.md](LANGUAGES.md)。`kokoro` 已验证 `zh-CN`、`en-US`、`en-GB` |
 | `kokoro_model` | `mlx-community/Kokoro-82M-4bit` | Kokoro MLX 模型 |
-| `voice` | `zf_xiaoxiao` | Kokoro 音色；音色名自带语言（`zf_` 普通话、`af_` 美式英语、`bf_` 英式英语） |
+| `voice` | `""` | Kokoro 音色；留空跟随解析后的语言（`zh-CN` 默认 `zf_xiaoxiao`，`en-US` 默认 `af_heart`，`en-GB` 默认 `bf_emma`）。前缀代表语言（`zf_`/`zm_` 普通话，`af_`/`am_` 美式英语，`bf_`/`bm_` 英式英语） |
 | `tts_speed` | `1.0` | 基础语速；1.0 正常，>1 更快 |
-| `say_voice` | `Tingting` | `say` 引擎的音色 |
+| `say_voice` | `""` | `say` 引擎的音色；留空跟随解析后的语言（`Tingting`、`Samantha`、`Daniel`） |
 
-Kokoro 中文音色：
+Kokoro 中文音色（`zh-CN`）：
 
 | 音色 | 性别/风格 |
 |---|---|
@@ -136,6 +136,17 @@ Kokoro 中文音色：
 | `zm_yunxia` | 男声，偏温和 |
 | `zm_yunyang` | 男声，偏明亮 |
 
+Kokoro 英文音色（需安装 `uv pip install 'reachreel[tts-en]'` 并执行一次 `python -m spacy download en_core_web_sm`）：
+
+| 音色 | 口音/性别 |
+|---|---|
+| `af_heart` | `en-US`，女声，默认 |
+| `af_bella` / `af_sarah` / `af_nova` | `en-US`，女声 |
+| `am_michael` / `am_adam` / `am_liam` | `en-US`，男声 |
+| `bf_emma` | `en-GB`，女声，默认 |
+| `bf_alice` / `bf_isabella` / `bf_lily` | `en-GB`，女声 |
+| `bm_george` / `bm_daniel` / `bm_lewis` | `en-GB`，男声 |
+
 > `say` 只用于没有装好 Kokoro 时快速验证流程，不建议作为成品音色。
 
 ---
@@ -147,10 +158,10 @@ Kokoro 中文音色：
 | `whisper_model` | `mlx-community/whisper-large-v3-turbo` | mlx-whisper 模型 |
 | `asr_language` | `""` | Whisper 识别提示；留空跟随 `content_language` 的主语言子标签 |
 | `subtitle_text` | `script` | `script`：原稿文字 + Whisper 时间戳；`asr`：直接用 Whisper 文字 |
-| `subtitle_max_chars` | `18` | 每行最多字数 |
+| `subtitle_max_chars` | `0` | 每行最多字数；`0` 跟随成片语言（`zh-CN` 为 `18`，`en` 为 `42`） |
 | `subtitle_max_lines` | `2` | 每条字幕最多行数 |
 | `subtitle_max_seconds` | `6.0` | 单条字幕最长显示时间 |
-| `subtitle_font` | `PingFang SC` | 字体 |
+| `subtitle_font` | `""` | 字体；留空跟随成片语言（`zh-CN` 为 `PingFang SC`，`en` 为 `Helvetica Neue`） |
 | `subtitle_size` | `48` | 字幕字号（输出像素） |
 | `subtitle_preset` | `""` | 平台安全区预设：`douyin` / `reels` / `shorts` / `landscape` |
 | `subtitle_render` | `outline` | `outline`：白字 + 黑描边 + 轻微阴影，只盖住笔画边缘；`box`：半透明黑底色块（旧行为，遮挡更多画面）；`none`：纯白字，无描边无阴影（亮画面容易被吃掉） |

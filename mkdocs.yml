@@ -1,0 +1,96 @@
+site_name: ReachReel
+site_description: Fully local video narration pipeline
+site_url: https://reachpub.github.io/ReachReel/
+repo_url: https://github.com/reachpub/ReachReel
+repo_name: reachpub/ReachReel
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+exclude_docs: |
+  README.md
+
+hooks:
+  - scripts/mkdocs_hooks.py
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: folder
+      fallback_to_default: true
+      reconfigure_material: true
+      reconfigure_search: true
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: zh-CN
+          name: 简体中文
+          build: true
+          theme:
+            language: zh
+          nav_translations:
+            Home: 首页
+            User Guide: 使用手册
+            Getting Started: 快速上手
+            Configuration: 配置参考
+            BGM: 背景音乐
+            Languages & Voices: 语言与音色规范
+            Engineering: 工程文档
+            Development: 开发文档
+            Desktop Architecture: 桌面版架构
+            Localization: 多语言与本地化
+            Roadmap: 路线图
+            Glossary: 术语表
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - User Guide: USER_GUIDE.md
+      - Configuration: CONFIGURATION.md
+      - BGM: BGM.md
+      - Languages & Voices: LANGUAGES.md
+  - Engineering:
+      - Development: DEVELOPMENT.md
+      - Desktop Architecture: DESKTOP_ARCHITECTURE.md
+      - Localization: LOCALIZATION.md
+      - Roadmap: ROADMAP.md
+      - Glossary: GLOSSARY.md

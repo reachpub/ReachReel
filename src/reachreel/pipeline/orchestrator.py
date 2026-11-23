@@ -269,7 +269,7 @@ class Pipeline:
             client=client,
             style=self.settings.style,
             brief=self.settings.brief,
-            cps=self.settings.speech_chars_per_second,
+            cps=self.settings.resolved_speech_chars_per_second(),
             density=self.settings.narration_density,
             temperature=self.settings.llm_temperature,
             content_language=self.settings.content_language,
@@ -657,7 +657,7 @@ class Pipeline:
                 vlm=settings.vlm_model,
                 llm=settings.llm_model,
                 tts=settings.tts_engine,
-                voice=settings.voice,
+                voice=settings.resolved_voice(),
             ),
             t(
                 "dry_run.render",
@@ -740,7 +740,7 @@ class Pipeline:
         info = self.load_video()
         segments = self._segments or []
         scenes = self._scenes or []
-        cps = max(0.1, self.settings.speech_chars_per_second)
+        cps = max(0.1, self.settings.resolved_speech_chars_per_second())
         estimates = [
             replace(
                 segment,
@@ -846,7 +846,7 @@ class Pipeline:
                 "vlm_model": self.settings.vlm_model,
                 "llm_model": self.settings.llm_model,
                 "tts_engine": self.settings.tts_engine,
-                "voice": self.settings.voice,
+                "voice": self.settings.resolved_voice(),
                 "whisper_model": self.settings.whisper_model,
                 "bgm": str(self.bgm_path) if self.bgm_source and self.bgm_path.exists() else None,
                 "burned_subtitles": burned,
@@ -866,7 +866,7 @@ class Pipeline:
                 "crf": self.settings.crf,
                 "preset": self.settings.preset,
                 "audio_bitrate": self.settings.audio_bitrate,
-                "subtitle_font": self.settings.subtitle_font,
+                "subtitle_font": self.settings.resolved_subtitle_font(),
                 "subtitle_size": self.settings.subtitle_size,
                 "subtitle_preset": self.settings.subtitle_preset,
                 "subtitle_margin_v": self.settings.subtitle_margin_v,
@@ -875,7 +875,7 @@ class Pipeline:
                 "subtitle_render": self.settings.subtitle_render,
                 "subtitle_outline": self.settings.subtitle_outline,
                 "subtitle_box_padding": self.settings.subtitle_box_padding,
-                "subtitle_max_chars": self.settings.subtitle_max_chars,
+                "subtitle_max_chars": self.settings.resolved_subtitle_max_chars(),
                 "subtitle_max_lines": self.settings.subtitle_max_lines,
                 "subtitle_max_seconds": self.settings.subtitle_max_seconds,
                 "subtitle_size_unit": "px",
@@ -1016,27 +1016,46 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
             t("doctor.installed") if found else t("doctor.missing"),
             found,
         )
+    resolved_asr = settings.resolved_asr_language()
+    resolved_voice = settings.resolved_voice()
     for axis, value in (
         ("content_language", settings.content_language),
         ("tts_language", settings.tts_language or "(follows content_language)"),
-        ("asr_language", settings.asr_language),
+        (
+            "asr_language",
+            settings.asr_language or f"{resolved_asr} (follows content_language)",
+        ),
+        ("voice", resolved_voice),
     ):
         add(f"language.{axis}", axis, str(value), True, required=False)
 
+    profile = None
     try:
-        from ..languages import resolve_tts_language, supported_tags
+        from ..languages import (
+            check_tts_dependencies,
+            require_voice_match,
+            resolve_tts_language,
+            supported_tags,
+        )
 
         profile = resolve_tts_language(
             tts_language=settings.tts_language,
             content_language=settings.content_language,
-            voice=settings.voice,
+            voice=resolved_voice,
         )
         code = profile.tts.get(settings.tts_engine)
         detail = f"{profile.tag} -> {settings.tts_engine}"
         detail += f" {code}" if code else " (no code)"
-        if profile.status != "supported":
+        good = profile.status == "supported"
+        if not good:
             detail += " (planned, not validated)"
-        add("language.tts", "TTS language", detail, profile.status == "supported")
+        else:
+            try:
+                require_voice_match(profile, resolved_voice)
+            except ValueError as exc:
+                detail = str(exc)
+                good = False
+        add("language.tts", "TTS language", detail, good)
     except ValueError as exc:
         add(
             "language.tts",
@@ -1045,13 +1064,22 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
             False,
         )
 
-    misaki = importlib.util.find_spec("misaki") is not None
-    add(
-        "module.misaki",
-        "misaki (Kokoro zh)",
-        t("doctor.installed") if misaki else t("doctor.misaki_missing"),
-        misaki,
-    )
+    if profile is not None:
+        g2p_ok, g2p_detail = check_tts_dependencies(profile, settings.tts_engine)
+        add(
+            "module.misaki",
+            f"G2P ({profile.tag})",
+            g2p_detail,
+            g2p_ok,
+        )
+    else:
+        misaki = importlib.util.find_spec("misaki") is not None
+        add(
+            "module.misaki",
+            "misaki",
+            t("doctor.installed") if misaki else t("doctor.misaki_missing"),
+            misaki,
+        )
 
     try:
         with urllib.request.urlopen(f"{settings.ollama_url.rstrip('/')}/api/tags", timeout=4) as resp:

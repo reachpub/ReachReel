@@ -3,6 +3,7 @@
 __pycache__/
 dist/
 build/
+site/
 *.pyc
 *.pyo
 .pytest_cache/
@@ -28,3 +29,7 @@ tests/fixtures/list.txt
 
 # Local inputs (BGM, fonts, models). Never commit.
 inputs/
+
+# Generated MkDocs index pages (copied from README.md / README.zh-CN.md).
+docs/en/index.md
+docs/zh-CN/index.md

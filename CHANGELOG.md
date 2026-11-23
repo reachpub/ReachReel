@@ -6,8 +6,18 @@
 
 ### Added
 
+- English narration, voiceover, and subtitle support (`en-US` and `en-GB` promoted to `supported` in `src/reachreel/languages.py`). Running `reachreel run video.mp4 --content-language en` (or `--tts-language en-GB`) now resolves the full English profile automatically: script target rate (`14.5` chars/sec), default Kokoro voice (`af_heart` / `bf_emma`), default macOS `say` voice (`Samantha` / `Daniel`), Whisper `en` hint, subtitle line width (`42` chars), Latin font (`Helvetica Neue`), and soft-subtitle track metadata (`language=eng`).
+- Optional `tts-en` extra in `pyproject.toml` (`spacy`, `num2words`, `espeakng-loader`, `phonemizer-fork`) that stays torch-free by matching `mlx-audio`'s non-transformer `KokoroPipeline` (`trf=False` + `en_core_web_sm` + `EspeakFallback`), plus `tts-zh` as the Chinese group extra.
+- English-aware TTS chunking in `_split_for_tts` (splits on sentence/clause boundaries and spaces up to 250 chars instead of chopping words at 70 chars) and punctuation-aware, balanced English subtitle wrapping in `media/subtitles.py`.
+- `reachreel doctor` now accepts `--content-language`, `--tts-language`, `--voice`, and `--tts`, validates voice/language agreement, and checks the language-specific G2P stack (including `en_core_web_sm`) with actionable install hints.
+- Validation for `en-US` and `en-GB` per `docs/en/LANGUAGES.md` §6: Whisper round-trip CER 0.00% (`af_heart`, `am_michael`, `bf_emma`) and 0.51% (`bm_george`), plus an end-to-end 1080p Niagara Falls run passing QA 20/20 (`pass=20 warn=0 fail=0`).
+- Bilingual MkDocs Material site (`mkdocs.yml`, `scripts/mkdocs_hooks.py`, `docs` extra in `pyproject.toml`) with English at the root and Simplified Chinese under `/zh-CN/`, plus `.github/workflows/docs.yml` to copy `README.md` / `README.zh-CN.md` into `index.md`, build in strict mode, and deploy to GitHub Pages.
 - `[tool.apdev] pypi_repository = "reachreel"` selects the `[reachreel]` section of `~/.pypirc` for `apdev release`, so this project's uploads use its own PyPI account while the other repositories keep the default section. Requires `apdev >= 0.2.6`; DEVELOPMENT documents the resolution order, the first-upload ownership rule, and the `TWINE_REPOSITORY` fallback.
 - PyPI-facing project metadata in `pyproject.toml`: `Project-URL` entries (homepage, repository, documentation, changelog, issues), eleven Trove classifiers, keywords, and the author. `twine check` passes for the wheel and the sdist, the licence renders through PEP 639 (`License-Expression: Apache-2.0` plus `License-File: LICENSE`/`NOTICE`), and the build emits Metadata-Version 2.5.
+
+### Changed
+
+- `speech_chars_per_second`, `voice`, `say_voice`, `subtitle_max_chars`, and `subtitle_font` now default to `0` / empty in `Settings` and `config.example.toml`, meaning "follow the resolved language profile" (Chinese runs still resolve to `3.9`, `zf_xiaoxiao`, `Tingting`, `18`, and `PingFang SC`; explicit overrides always win).
 
 ### Fixed
 
