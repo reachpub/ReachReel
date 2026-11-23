@@ -93,7 +93,9 @@ output_fps = 30
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `style` | 空 = `prompts/<lang>/style.txt` | 旁白风格提示；留空使用语言默认风格 |
+| `style_preset` | `oral` | 说话风格预设：`oral`（真人口语聊天感）、`casual`（轻松随拍 Vlog）、`literary`（克制书面散文）、`documentary`（沉稳纪录片）、`commentary`（节奏解说口播） |
+| `style` | 空 | 自定义旁白风格描述；非空时覆盖 `style_preset` |
+| `script_oral_polish` | `true` | 使用口语预设（`oral`、`casual`、`commentary`）且未填自定义 `style` 时，自动跑一遍口语化润色 |
 | `brief` | 空 | 拍摄地、人物、活动等背景；强烈建议填写 |
 | `speech_chars_per_second` | `0.0` | 口播速度估算，用于算目标字数；`0` 跟随成片语言（`zh-CN` 为 `3.9`，`en` 为 `14.5`） |
 | `narration_density` | `0.62` | 旁白密度 0.2–1.0；0.4 更 Vlog，0.75 更像纪录片 |
@@ -116,12 +118,35 @@ target_chars ≈ duration × speech_chars_per_second × narration_density
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `tts_engine` | `kokoro` | `kokoro` 或 `say`（macOS 调试用） |
-| `tts_language` | `""` | 配音语言，BCP 47 标签（`zh-CN`、`en-US`、`en-GB` 等）。留空跟随 `content_language`。引擎内部代码不外露；音色语言与它不一致会直接报错，详见 [LANGUAGES.md](LANGUAGES.md)。`kokoro` 已验证 `zh-CN`、`en-US`、`en-GB` |
+| `tts_engine` | `kokoro` | `kokoro`、`qwen3`（基于 MLX 的 Qwen3-TTS，支持情绪指令、音色设计、零样本克隆）或 `say`（macOS 调试用） |
+| `tts_language` | `""` | 配音语言，BCP 47 标签（`zh-CN`、`en-US`、`en-GB` 等）。留空跟随 `content_language`。引擎内部代码不外露；音色语言与它不一致会直接报错，详见 [LANGUAGES.md](LANGUAGES.md)。`kokoro` 与 `qwen3` 均支持 `zh-CN`、`en-US`、`en-GB` |
 | `kokoro_model` | `mlx-community/Kokoro-82M-4bit` | Kokoro MLX 模型 |
-| `voice` | `""` | Kokoro 音色；留空跟随解析后的语言（`zh-CN` 默认 `zf_xiaoxiao`，`en-US` 默认 `af_heart`，`en-GB` 默认 `bf_emma`）。前缀代表语言（`zf_`/`zm_` 普通话，`af_`/`am_` 美式英语，`bf_`/`bm_` 英式英语） |
-| `tts_speed` | `1.0` | 基础语速；1.0 正常，>1 更快 |
+| `qwen3_model` | `""` | Qwen3-TTS MLX 模型；留空自动选择 `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-6bit`（配置了 `tts_ref_audio` 时自动选 `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16`） |
+| `voice` | `""` | 音色名；留空跟随解析后的语言与引擎（`kokoro` 默认 `zf_xiaoxiao`/`af_heart`/`bf_emma`；`qwen3` 默认 `Serena`/`Ryan`）。Kokoro 支持逗号混音，例如 `zf_xiaoxiao,zf_xiaoni` |
+| `tts_speed` | `1.0` | 基础语速；`1.0` 正常，`>1` 更快 |
+| `tts_instruct` | `""` | Qwen3 `CustomVoice` 情绪/口吻指令，或 `VoiceDesign` 音色描述 |
+| `tts_ref_audio` | `""` | Qwen3 `Base` 声音克隆用的 5–10 秒参考干声路径 |
+| `tts_ref_text` | `""` | `tts_ref_audio` 对应的准确文本，用于高保真克隆 |
+| `tts_temperature` | `0.0` | 生成式 TTS 采样温度（`0` 使用模型默认值） |
+| `tts_top_p` | `0.0` | 生成式 TTS 核采样 `top_p`（`0` 使用模型默认值） |
+| `tts_top_k` | `0` | 生成式 TTS top-k 采样（`0` 使用模型默认值） |
+| `tts_repetition_penalty` | `0.0` | 生成式 TTS 重复惩罚（`0` 使用模型默认值） |
+| `tts_seed` | `-1` | 固定随机种子（`>= 0` 可复现；`-1` 为随机） |
+| `tts_chunk_pause_seconds` | `0.12` | 单段长文本切分后子句之间的静音停顿（秒） |
+| `tts_pitch` | `0.0` | 音高微调（半音，例如 `-1.5` 到 `+1.5`；`0` 关闭） |
+| `tts_volume` | `1.0` | 进混音前的人声增益倍率（`1.0` 为原始音量） |
 | `say_voice` | `""` | `say` 引擎的音色；留空跟随解析后的语言（`Tingting`、`Samantha`、`Daniel`） |
+
+Qwen3-TTS 内置音色（`CustomVoice`）：
+
+| 音色 | 语言/风格 |
+|---|---|
+| `Serena` / `Vivian` | 中文（默认 `Serena`），温润 / 明亮女声 |
+| `Uncle_Fu` | 中文，沉稳男声 |
+| `Dylan` / `Eric` | 中文，北京话 / 四川话 |
+| `Ryan` / `Aiden` | 英文（默认 `Ryan`），男声 |
+
+也支持在 `config.toml` 里用 `[tts]` 表写法（如 `engine = "qwen3"`、`speed = 0.95`、`instruct = "..."`、`ref_audio = "..."`），或者在 `script.json` 的单个片段中覆盖 `voice`、`instruct`、`speed` 后单独执行 `reachreel tts <workdir>`。
 
 Kokoro 中文音色（`zh-CN`）：
 

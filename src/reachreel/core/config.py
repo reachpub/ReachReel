@@ -15,7 +15,12 @@ from ..languages import (
     profile_for,
     resolve_asr_language,
 )
+from ..prompts import load_prompt
 from ..prompts import normalize_language as normalize_content_language
+from ..prompts import text as prompt_text
+
+DEFAULT_QWEN3_CUSTOM_VOICE_MODEL = "mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-6bit"
+DEFAULT_QWEN3_BASE_MODEL = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16"
 
 
 @dataclass
@@ -43,7 +48,9 @@ class Settings:
     max_scenes: int = 160
 
     # Script
-    style: str = ""  # empty = language-specific default from prompts/<lang>/style.txt
+    style_preset: str = "oral"  # oral | casual | literary | documentary | commentary
+    style: str = ""  # custom style override; empty = resolved from style_preset
+    script_oral_polish: bool = True
     brief: str = ""
     speech_chars_per_second: float = 0.0  # 0 = language default (3.9 zh, 14.5 en)
     narration_density: float = 0.62
@@ -53,13 +60,25 @@ class Settings:
     max_speedup: float = 1.32
 
     # TTS
-    tts_engine: str = "kokoro"  # kokoro | say
+    tts_engine: str = "kokoro"  # kokoro | qwen3 | say
     # BCP 47 tag for the voiceover language; empty follows content_language.
     # Engine codes (Kokoro a/b/z, Whisper zh/en) never appear here.
     tts_language: str = ""
     kokoro_model: str = "mlx-community/Kokoro-82M-4bit"
-    voice: str = ""  # empty = language default (zf_xiaoxiao, af_heart, bf_emma)
+    qwen3_model: str = ""  # empty = auto (CustomVoice-6bit or Base-bf16 when tts_ref_audio is set)
+    voice: str = ""  # empty = language/engine default; kokoro supports comma blending
     tts_speed: float = 1.0
+    tts_instruct: str = ""  # emotion/delivery instruction (Qwen3 CustomVoice / VoiceDesign)
+    tts_ref_audio: str = ""  # reference audio path for Qwen3 Base voice cloning
+    tts_ref_text: str = ""  # exact transcript of tts_ref_audio
+    tts_temperature: float = 0.0  # 0 = model default
+    tts_top_p: float = 0.0  # 0 = model default
+    tts_top_k: int = 0  # 0 = model default
+    tts_repetition_penalty: float = 0.0  # 0 = model default
+    tts_seed: int = -1  # >= 0 fixes the RNG seed
+    tts_chunk_pause_seconds: float = 0.12  # pause in seconds between split chunks within one segment
+    tts_pitch: float = 0.0  # pitch shift in semitones
+    tts_volume: float = 1.0  # pre-mix narration gain multiplier
     say_voice: str = ""  # empty = language default (Tingting, Samantha, Daniel)
 
     # ASR / subtitles
@@ -143,24 +162,57 @@ class Settings:
     @classmethod
     def load(cls, path: Path | None = None, overrides: dict[str, Any] | None = None) -> Settings:
         data: dict[str, Any] = {}
+        base: Path | None = None
         if path and path.exists():
             with path.open("rb") as fh:
                 data = tomllib.load(fh)
             base = path.parent
-            for key in ("bgm_dir", "bgm_file", "work_root"):
+            for key in ("bgm_dir", "bgm_file", "work_root", "tts_ref_audio"):
                 if data.get(key):
                     value = Path(str(data[key])).expanduser()
                     if not value.is_absolute():
-                        value = (base / value)
+                        value = base / value
                     data[key] = str(value)
         settings = cls()
         valid = {f.name for f in fields(cls)}
+        tts_aliases = {
+            "engine": "tts_engine",
+            "language": "tts_language",
+            "voice": "voice",
+            "kokoro_model": "kokoro_model",
+            "qwen3_model": "qwen3_model",
+            "say_voice": "say_voice",
+            "speed": "tts_speed",
+            "instruct": "tts_instruct",
+            "ref_audio": "tts_ref_audio",
+            "ref_text": "tts_ref_text",
+            "temperature": "tts_temperature",
+            "top_p": "tts_top_p",
+            "top_k": "tts_top_k",
+            "repetition_penalty": "tts_repetition_penalty",
+            "seed": "tts_seed",
+            "chunk_pause": "tts_chunk_pause_seconds",
+            "chunk_pause_seconds": "tts_chunk_pause_seconds",
+            "pitch": "tts_pitch",
+            "volume": "tts_volume",
+        }
         for key, value in data.items():
             if key == "qa" and isinstance(value, dict):
                 # [qa] table: freeze_min_seconds -> qa_freeze_min_seconds
                 for sub_key, sub_value in value.items():
                     attr = f"qa_{sub_key}"
                     if attr in valid and sub_value is not None:
+                        setattr(settings, attr, sub_value)
+            elif key == "tts" and isinstance(value, dict):
+                # Optional [tts] table alias: speed -> tts_speed, etc.
+                for sub_key, sub_value in value.items():
+                    attr = tts_aliases.get(sub_key, sub_key)
+                    if attr in valid and sub_value is not None:
+                        if attr == "tts_ref_audio" and sub_value and base is not None:
+                            ref_path = Path(str(sub_value)).expanduser()
+                            if not ref_path.is_absolute():
+                                ref_path = base / ref_path
+                            sub_value = str(ref_path)
                         setattr(settings, attr, sub_value)
             elif key in valid and value is not None:
                 setattr(settings, key, value)
@@ -170,6 +222,8 @@ class Settings:
                 setattr(settings, key, value)
         settings.ui_language = normalize_language(settings.ui_language)
         settings.content_language = normalize_content_language(settings.content_language)
+        settings.style_preset = normalize_style_preset(settings.style_preset)
+        settings.tts_engine = str(settings.tts_engine or "kokoro").strip().lower()
         settings.subtitle_preset = normalize_subtitle_preset(settings.subtitle_preset)
         settings.subtitle_render = normalize_subtitle_render(settings.subtitle_render)
         settings.tts_language = normalize_tag(settings.tts_language) or str(
@@ -182,6 +236,7 @@ class Settings:
         mapping = {
             "REACHREEL_LANG": "ui_language",
             "REACHREEL_CONTENT_LANGUAGE": "content_language",
+            "REACHREEL_STYLE_PRESET": "style_preset",
             "REACHREEL_OLLAMA_URL": "ollama_url",
             "REACHREEL_VLM_MODEL": "vlm_model",
             "REACHREEL_LLM_MODEL": "llm_model",
@@ -189,6 +244,7 @@ class Settings:
             "REACHREEL_BGM_DIR": "bgm_dir",
             "REACHREEL_WHISPER_MODEL": "whisper_model",
             "REACHREEL_TTS_ENGINE": "tts_engine",
+            "REACHREEL_QWEN3_MODEL": "qwen3_model",
             "REACHREEL_CACHE_DIR": "cache_dir",
         }
         for env_name, attr in mapping.items():
@@ -217,11 +273,46 @@ class Settings:
             return float(self.speech_chars_per_second)
         return self.content_profile().speech_chars_per_second
 
+    def resolved_style_preset(self) -> str:
+        return normalize_style_preset(self.style_preset)
+
+    def resolved_style(self) -> str:
+        explicit = (self.style or "").strip()
+        if explicit:
+            return explicit
+        preset = self.resolved_style_preset()
+        key = f"styles.{preset}"
+        value = prompt_text(self.content_language, key)
+        if value != key and value.strip():
+            return value.strip()
+        return load_prompt(self.content_language, "style").strip()
+
+    def resolved_style_guidance(self) -> str:
+        if (self.style or "").strip():
+            key = "style_guidance.custom"
+        else:
+            key = f"style_guidance.{self.resolved_style_preset()}"
+        value = prompt_text(self.content_language, key)
+        return "" if value == key else value.strip()
+
+    def resolved_qwen3_model(self) -> str:
+        explicit = (self.qwen3_model or "").strip()
+        if explicit:
+            return explicit
+        if (self.tts_ref_audio or "").strip():
+            return DEFAULT_QWEN3_BASE_MODEL
+        return DEFAULT_QWEN3_CUSTOM_VOICE_MODEL
+
     def resolved_voice(self) -> str:
         explicit = (self.voice or "").strip()
         if explicit:
             return explicit
-        return self._voice_profile().default_voice or PROFILES["zh-CN"].default_voice
+        profile = self._voice_profile()
+        if self.tts_engine == "qwen3":
+            if (self.tts_ref_audio or "").strip():
+                return ""
+            return profile.default_qwen3_voice or PROFILES["zh-CN"].default_qwen3_voice
+        return profile.default_voice or PROFILES["zh-CN"].default_voice
 
     def resolved_say_voice(self) -> str:
         explicit = (self.say_voice or "").strip()
@@ -242,6 +333,26 @@ class Settings:
 
     def resolved_asr_language(self) -> str:
         return resolve_asr_language(self.asr_language, self.content_language)
+
+
+STYLE_PRESETS = ("oral", "casual", "literary", "documentary", "commentary")
+
+
+def normalize_style_preset(value: str | None) -> str:
+    """Normalize a narration style preset; unknown or empty values mean ``oral``."""
+    preset = str(value or "").strip().lower()
+    aliases = {
+        "spoken": "oral",
+        "colloquial": "oral",
+        "vlog": "oral",
+        "conversational": "oral",
+        "written": "literary",
+        "prose": "literary",
+        "poetic": "literary",
+        "doc": "documentary",
+    }
+    preset = aliases.get(preset, preset)
+    return preset if preset in STYLE_PRESETS else "oral"
 
 
 SUBTITLE_PRESETS = ("", "douyin", "reels", "shorts", "landscape")

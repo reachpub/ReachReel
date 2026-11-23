@@ -46,6 +46,7 @@ class LanguageProfile:
     font_hint: str
     # Default voices used when the user does not set `voice` / `say_voice`.
     default_voice: str = ""
+    default_qwen3_voice: str = ""
     default_say_voice: str = ""
     # ISO 639-2 code written to soft-subtitle track metadata (e.g. chi / eng).
     iso639_2: str = ""
@@ -65,9 +66,10 @@ PROFILES: dict[str, LanguageProfile] = {
         subtitle_max_chars=18,
         font_hint="PingFang SC",
         default_voice="zf_xiaoxiao",
+        default_qwen3_voice="Serena",
         default_say_voice="Tingting",
         iso639_2="chi",
-        tts={"kokoro": "z"},
+        tts={"kokoro": "z", "qwen3": "Chinese"},
         requires="tts-zh",
         notes="misaki[zh]; validated end to end on real footage",
     ),
@@ -79,9 +81,10 @@ PROFILES: dict[str, LanguageProfile] = {
         subtitle_max_chars=42,
         font_hint="Helvetica Neue",
         default_voice="af_heart",
+        default_qwen3_voice="Ryan",
         default_say_voice="Samantha",
         iso639_2="eng",
-        tts={"kokoro": "a"},
+        tts={"kokoro": "a", "qwen3": "English"},
         requires="tts-en",
         notes="spacy (en_core_web_sm) + espeak-ng fallback; validated end to end",
     ),
@@ -93,9 +96,10 @@ PROFILES: dict[str, LanguageProfile] = {
         subtitle_max_chars=42,
         font_hint="Helvetica Neue",
         default_voice="bf_emma",
+        default_qwen3_voice="Ryan",
         default_say_voice="Daniel",
         iso639_2="eng",
-        tts={"kokoro": "b"},
+        tts={"kokoro": "b", "qwen3": "English"},
         requires="tts-en",
         notes="spacy (en_core_web_sm) + espeak-ng fallback; validated end to end",
     ),
@@ -284,18 +288,20 @@ def require_tts(profile: LanguageProfile, engine: str) -> str:
 
 
 def require_voice_match(profile: LanguageProfile, voice: str) -> None:
-    """Reject a voice whose language disagrees with the resolved profile."""
-    voice_tag = voice_language(voice)
-    if voice_tag is None or voice_tag == profile.tag:
-        return
-    hint = ""
-    voice_profile = PROFILES.get(voice_tag)
-    if voice_profile is not None and voice_profile.status != SUPPORTED:
-        hint = f"; note: {voice_tag} is planned and cannot synthesize yet"
-    raise ValueError(
-        f"voice {voice!r} speaks {voice_tag} but the resolved language is "
-        f"{profile.tag}{hint}; set tts_language or pick a matching voice"
-    )
+    """Reject a voice (or blended voice list) whose language disagrees with the resolved profile."""
+    parts = [part.strip() for part in (voice or "").split(",") if part.strip()] or [voice]
+    for part in parts:
+        voice_tag = voice_language(part)
+        if voice_tag is None or voice_tag == profile.tag:
+            continue
+        hint = ""
+        voice_profile = PROFILES.get(voice_tag)
+        if voice_profile is not None and voice_profile.status != SUPPORTED:
+            hint = f"; note: {voice_tag} is planned and cannot synthesize yet"
+        raise ValueError(
+            f"voice {part!r} speaks {voice_tag} but the resolved language is "
+            f"{profile.tag}{hint}; set tts_language or pick a matching voice"
+        )
 
 
 @lru_cache(maxsize=1)
@@ -319,6 +325,10 @@ def check_tts_dependencies(
     Returns ``(ok, detail)`` so ``doctor`` and the TTS adapter report the exact
     same missing packages and install command.
     """
+    if engine == "qwen3":
+        if find_spec("mlx_audio") is None:
+            return False, "missing mlx_audio (install: uv pip install 'mlx-audio>=0.6.7')"
+        return True, "mlx-audio (qwen3_tts)"
     if engine != "kokoro":
         return True, engine
     if profile.primary == "zh":

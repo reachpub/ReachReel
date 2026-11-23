@@ -99,9 +99,19 @@ class NarrationSegment:
     start: float = 0.0
     end: float = 0.0
     tts_speed: float = 1.0
+    instruct: str = ""
+    voice: str = ""
+    speed: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if not self.instruct:
+            data.pop("instruct", None)
+        if not self.voice:
+            data.pop("voice", None)
+        if self.speed <= 0:
+            data.pop("speed", None)
+        return data
 
 
 @dataclass

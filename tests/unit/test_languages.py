@@ -106,10 +106,14 @@ class LanguageRegistryTests(unittest.TestCase):
             require_voice_match(profile_for("en-US"), "jf_alpha")
         self.assertIn("planned", str(ctx.exception))
 
-        # Matching voices pass.
+        # Matching voices pass, including comma-blended Kokoro voices.
         require_voice_match(profile_for("zh-CN"), "zf_xiaoxiao")
+        require_voice_match(profile_for("zh-CN"), "zf_xiaoxiao,zf_xiaoni")
         require_voice_match(profile_for("en-US"), "af_heart")
         require_voice_match(profile_for("en-GB"), "bf_emma")
+
+        with self.assertRaises(ValueError):
+            require_voice_match(profile_for("zh-CN"), "zf_xiaoxiao,af_heart")
 
     def test_language_aware_settings_defaults(self):
         zh = Settings()
@@ -222,6 +226,33 @@ class LanguageRegistryTests(unittest.TestCase):
         self.assertFalse(checks["language.tts"]["ok"])
         self.assertIn("planned", checks["language.tts"]["value"])
         self.assertFalse(report["ok"])
+
+    def test_qwen3_language_and_doctor_checks(self):
+        from reachreel.pipeline.orchestrator import doctor_report
+
+        self.assertEqual(require_tts(profile_for("zh-CN"), "qwen3"), "Chinese")
+        self.assertEqual(require_tts(profile_for("en-US"), "qwen3"), "English")
+        zh_qwen = Settings(tts_engine="qwen3")
+        self.assertEqual(zh_qwen.resolved_voice(), "Serena")
+        en_qwen = Settings(content_language="en", tts_engine="qwen3")
+        self.assertEqual(en_qwen.resolved_voice(), "Ryan")
+
+        mismatch = doctor_report(
+            Settings(tts_engine="qwen3", voice="zf_xiaoxiao", ollama_url="http://127.0.0.1:1")
+        )
+        checks = {check["id"]: check for check in mismatch["checks"]}
+        self.assertFalse(checks["language.tts"]["ok"])
+        self.assertIn("Kokoro", checks["language.tts"]["value"])
+
+        missing_ref = doctor_report(
+            Settings(
+                tts_engine="qwen3",
+                tts_ref_audio="/nonexistent/voice_sample.wav",
+                ollama_url="http://127.0.0.1:1",
+            )
+        )
+        ref_checks = {check["id"]: check for check in missing_ref["checks"]}
+        self.assertFalse(ref_checks["tts.ref_audio"]["ok"])
 
 
 if __name__ == "__main__":

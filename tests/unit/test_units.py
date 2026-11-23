@@ -26,13 +26,23 @@ from reachreel.domain.models import (
 from reachreel.domain.timeline import place_segments
 from reachreel.engines.tts import (
     KokoroEngine,
+    Qwen3TTSEngine,
     _split_for_tts,
     _synthesize_with_retries,
+    _tts_audio_filter_chain,
+    make_engine,
     synthesize_segments,
+    tts_cache_key,
+    validate_ref_audio,
 )
 from reachreel.engines.vlm import analyze_scenes
 from reachreel.engines.vlm import settings_key as vlm_settings_key
-from reachreel.generation.script import _clean_text, _extract_json_array
+from reachreel.generation.script import (
+    _clean_text,
+    _extract_json_array,
+    _normalise_segments,
+    generate_script,
+)
 from reachreel.i18n import set_language
 from reachreel.media.audio import (
     _bgm_filter,
@@ -811,6 +821,354 @@ class UnitTests(unittest.TestCase):
             )
         self.assertTrue(cues)
         self.assertEqual([flag.code for flag in flags], ["asr.fallback"])
+
+    def test_style_presets_custom_override_and_oral_polish(self):
+        self.assertEqual(Settings.load(overrides={"style_preset": "spoken"}).style_preset, "oral")
+        self.assertEqual(Settings.load(overrides={"style_preset": "written"}).style_preset, "literary")
+        self.assertEqual(Settings.load(overrides={"style_preset": "unknown"}).style_preset, "oral")
+
+        custom = Settings(style_preset="oral", style="东北老铁唠嗑风格")
+        self.assertEqual(custom.resolved_style(), "东北老铁唠嗑风格")
+        self.assertIn("指定风格", custom.resolved_style_guidance())
+
+        scenes = [Scene(id=1, start=0.0, end=8.0, summary="小孩在雪地里滑行")]
+
+        class FakeClient:
+            def __init__(self):
+                self.prompts: list[str] = []
+
+            def chat(self, messages, **_kwargs):
+                self.prompts.append(messages[0]["content"])
+                if len(self.prompts) == 1:
+                    return '[{"scene_ids":[1],"text":"少年踩雪而行，如画中人。"}]'
+                return '[{"scene_ids":[1],"text":"小朋友刚踏上雪道，脚底下还有点打滑。"}]'
+
+        # Default oral preset runs the spoken polish pass.
+        oral_client = FakeClient()
+        segs = generate_script(
+            scenes,
+            duration=15.0,
+            client=oral_client,
+            style="",
+            style_preset="oral",
+            oral_polish=True,
+        )
+        self.assertEqual(len(oral_client.prompts), 2)
+        self.assertIn("口语", oral_client.prompts[0])
+        self.assertEqual(segs[0].text, "小朋友刚踏上雪道，脚底下还有点打滑。")
+
+        # Literary preset skips the oral polish pass.
+        lit_client = FakeClient()
+        segs_lit = generate_script(
+            scenes,
+            duration=15.0,
+            client=lit_client,
+            style="",
+            style_preset="literary",
+            oral_polish=True,
+        )
+        self.assertEqual(len(lit_client.prompts), 1)
+        self.assertEqual(segs_lit[0].text, "少年踩雪而行，如画中人。")
+
+        # Custom style also skips automatic oral rewriting.
+        custom_client = FakeClient()
+        generate_script(
+            scenes,
+            duration=15.0,
+            client=custom_client,
+            style="文言游记",
+            style_preset="oral",
+            oral_polish=True,
+        )
+        self.assertEqual(len(custom_client.prompts), 1)
+        self.assertIn("文言游记", custom_client.prompts[0])
+
+    def test_normalise_segments_preserves_optional_tts_overrides(self):
+        scenes = [Scene(id=1, start=0.0, end=5.0)]
+        segments = _normalise_segments(
+            [
+                {
+                    "scene_ids": [1],
+                    "text": "这一下太刺激了！",
+                    "voice": "Vivian",
+                    "instruct": "语气兴奋一点",
+                    "speed": 1.1,
+                }
+            ],
+            scenes,
+            "zh",
+        )
+        self.assertEqual(segments[0].voice, "Vivian")
+        self.assertEqual(segments[0].instruct, "语气兴奋一点")
+        self.assertAlmostEqual(segments[0].speed, 1.1)
+
+    def test_tts_table_in_config_and_ref_audio_resolution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "config.toml"
+            ref = Path(tmp) / "voices" / "me.wav"
+            ref.parent.mkdir(parents=True)
+            ref.write_bytes(b"RIFF" + b"\x00" * 40)
+            cfg.write_text(
+                '[tts]\n'
+                'engine = "qwen3"\n'
+                "speed = 0.92\n"
+                'instruct = "轻松聊天感"\n'
+                'ref_audio = "voices/me.wav"\n'
+                'ref_text = "你好，这是我的声音。"\n'
+                "temperature = 0.75\n"
+                "top_p = 0.9\n"
+                "top_k = 40\n"
+                "repetition_penalty = 1.1\n"
+                "seed = 42\n"
+                "chunk_pause = 0.2\n"
+                "pitch = -1.5\n"
+                "volume = 1.15\n",
+                encoding="utf-8",
+            )
+            settings = Settings.load(cfg)
+        self.assertEqual(settings.tts_engine, "qwen3")
+        self.assertAlmostEqual(settings.tts_speed, 0.92)
+        self.assertEqual(settings.tts_instruct, "轻松聊天感")
+        self.assertEqual(Path(settings.tts_ref_audio).resolve(), ref.resolve())
+        self.assertEqual(settings.tts_ref_text, "你好，这是我的声音。")
+        self.assertAlmostEqual(settings.tts_temperature, 0.75)
+        self.assertAlmostEqual(settings.tts_top_p, 0.9)
+        self.assertEqual(settings.tts_top_k, 40)
+        self.assertAlmostEqual(settings.tts_repetition_penalty, 1.1)
+        self.assertEqual(settings.tts_seed, 42)
+        self.assertAlmostEqual(settings.tts_chunk_pause_seconds, 0.2)
+        self.assertAlmostEqual(settings.tts_pitch, -1.5)
+        self.assertAlmostEqual(settings.tts_volume, 1.15)
+        self.assertIn("Base", settings.resolved_qwen3_model())
+        self.assertEqual(settings.resolved_voice(), "")
+
+    def test_tts_audio_filter_chain_and_cache_key(self):
+        self.assertIsNone(_tts_audio_filter_chain())
+        chain = _tts_audio_filter_chain(speed=1.1, pitch=-2.0, volume=1.2)
+        self.assertIn("aresample=24000", chain)
+        self.assertIn("asetrate=", chain)
+        self.assertIn("atempo=", chain)
+        self.assertIn("volume=1.2000", chain)
+
+        base = Settings(tts_engine="qwen3", tts_instruct="自然放松")
+        k1 = tts_cache_key(base, "你好", speed=1.0, voice="Serena", instruct="自然放松")
+        k2 = tts_cache_key(base, "你好", speed=1.0, voice="Serena", instruct="特别兴奋")
+        base_pitch = Settings(tts_engine="qwen3", tts_instruct="自然放松", tts_pitch=-1.0)
+        k3 = tts_cache_key(base_pitch, "你好", speed=1.0, voice="Serena", instruct="自然放松")
+        self.assertNotEqual(k1, k2)
+        self.assertNotEqual(k1, k3)
+
+    def test_qwen3_engine_routing_and_validation(self):
+        self.assertIsInstance(make_engine(Settings(tts_engine="qwen3")), Qwen3TTSEngine)
+
+        with self.assertRaises(ValueError):
+            validate_ref_audio("bad\x00path.wav")
+        with self.assertRaises(FileNotFoundError):
+            validate_ref_audio("/nonexistent/sample.wav")
+        with tempfile.TemporaryDirectory() as tmp:
+            bad_ext = Path(tmp) / "note.txt"
+            bad_ext.write_text("hi", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                validate_ref_audio(str(bad_ext))
+
+        # Mocked model generation for custom_voice, voice_design, and base cloning.
+        import types
+
+        import numpy as np
+
+        calls: list[tuple[str, dict]] = []
+
+        class FakeConfig:
+            def __init__(self, model_type):
+                self.tts_model_type = model_type
+
+        class FakeModel:
+            def __init__(self, model_type):
+                self.config = FakeConfig(model_type)
+                self.supported_speakers = ["Serena", "Vivian", "Ryan"]
+
+            def generate(self, text, **kwargs):
+                calls.append((text, kwargs))
+                yield types.SimpleNamespace(
+                    audio=np.zeros(2400, dtype=np.float32),
+                    sample_rate=24000,
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "out.wav"
+            settings = Settings(
+                tts_engine="qwen3",
+                voice="Serena",
+                tts_instruct="像朋友聊天",
+                tts_temperature=0.7,
+                tts_top_p=0.95,
+                tts_top_k=30,
+                tts_repetition_penalty=1.05,
+            )
+            engine = Qwen3TTSEngine(settings)
+            engine._model = FakeModel("custom_voice")
+            with patch("reachreel.engines.tts._finalize_tts_wav", return_value=0.5):
+                dur = engine.synthesize("测试一下。", out, speed=1.05)
+            self.assertEqual(dur, 0.5)
+            self.assertEqual(calls[-1][1]["voice"], "Serena")
+            self.assertEqual(calls[-1][1]["instruct"], "像朋友聊天")
+            self.assertEqual(calls[-1][1]["lang_code"], "Chinese")
+            self.assertAlmostEqual(calls[-1][1]["temperature"], 0.7)
+
+            # VoiceDesign requires instruct.
+            engine._model = FakeModel("voice_design")
+            with self.assertRaises(RuntimeError):
+                engine.synthesize("测试。", out, instruct="")
+
+            # Base cloning requires ref_audio.
+            engine._model = FakeModel("base")
+            with self.assertRaises(RuntimeError):
+                engine.synthesize("测试。", out)
+
+            ref_wav = Path(tmp) / "ref.wav"
+            ref_wav.write_bytes(b"RIFF" + b"\x00" * 40)
+            engine.settings.tts_ref_audio = str(ref_wav)
+            engine.settings.tts_ref_text = "参考文本"
+            with patch("reachreel.engines.tts._finalize_tts_wav", return_value=0.5):
+                engine.synthesize("克隆测试。", out)
+            self.assertEqual(calls[-1][1]["ref_audio"], str(ref_wav.resolve()))
+            self.assertEqual(calls[-1][1]["ref_text"], "参考文本")
+            self.assertNotIn("voice", calls[-1][1])
+
+    def test_synthesize_segments_forwards_per_segment_overrides(self):
+        recorded: list[tuple[str, float, str | None, str | None]] = []
+
+        class OverrideEngine:
+            supports_segment_overrides = True
+
+            def synthesize(self, text, out, *, speed=1.0, voice=None, instruct=None):
+                recorded.append((text, speed, voice, instruct))
+                out.write_bytes(b"0" * 2048)
+                return 1.2
+
+        segments = [
+            NarrationSegment(
+                id=1,
+                scene_ids=[1],
+                text="第一段",
+                voice="Vivian",
+                instruct="开心一点",
+                speed=1.15,
+            )
+        ]
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "reachreel.engines.tts.make_engine", return_value=OverrideEngine()
+        ), patch("reachreel.engines.tts._wav_duration", return_value=1.2):
+            flags = synthesize_segments(
+                segments,
+                Path(tmp),
+                Settings(tts_engine="qwen3", voice="Serena"),
+                retries=0,
+            )
+        self.assertEqual(flags, [])
+        self.assertEqual(recorded, [("第一段", 1.15, "Vivian", "开心一点")])
+
+    def test_cli_parses_style_and_tts_options_and_voices_command(self):
+        import io
+        from contextlib import redirect_stdout
+
+        from reachreel.cli.main import _overrides, build_parser, main
+
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "run",
+                "clip.mp4",
+                "--style-preset",
+                "casual",
+                "--style",
+                "朋友聊天",
+                "--no-oral-polish",
+                "--tts",
+                "qwen3",
+                "--voice",
+                "Serena",
+                "--tts-speed",
+                "0.95",
+                "--tts-instruct",
+                "自然放松",
+                "--tts-pitch",
+                "-1.0",
+                "--tts-seed",
+                "7",
+            ]
+        )
+        ov = _overrides(args)
+        self.assertEqual(ov["style_preset"], "casual")
+        self.assertEqual(ov["style"], "朋友聊天")
+        self.assertFalse(ov["script_oral_polish"])
+        self.assertEqual(ov["tts_engine"], "qwen3")
+        self.assertEqual(ov["voice"], "Serena")
+        self.assertAlmostEqual(ov["tts_speed"], 0.95)
+        self.assertEqual(ov["tts_instruct"], "自然放松")
+        self.assertAlmostEqual(ov["tts_pitch"], -1.0)
+        self.assertEqual(ov["tts_seed"], 7)
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = main(["voices", "--json"])
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertIn("oral", payload["style_presets"])
+        self.assertIn("Serena", payload["voices"]["qwen3"]["zh-CN"])
+        self.assertIn("zf_xiaoxiao", payload["voices"]["kokoro"]["zh-CN"])
+
+        # BooleanOptionalAction supports re-enabling oral polish via CLI too.
+        args_on = parser.parse_args(["script", "work", "--oral-polish"])
+        self.assertTrue(_overrides(args_on)["script_oral_polish"])
+
+    def test_segment_to_dict_omits_unset_overrides_and_workdir_context_resets_stale_fields(self):
+        from reachreel.cli.main import _workdir_context, build_parser
+
+        plain = NarrationSegment(id=1, scene_ids=[1], text="hi").to_dict()
+        self.assertNotIn("speed", plain)
+        self.assertNotIn("voice", plain)
+        self.assertNotIn("instruct", plain)
+        custom = NarrationSegment(
+            id=1, scene_ids=[1], text="hi", voice="Vivian", instruct="warm", speed=1.1
+        ).to_dict()
+        self.assertEqual(custom["voice"], "Vivian")
+        self.assertEqual(custom["instruct"], "warm")
+        self.assertAlmostEqual(custom["speed"], 1.1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video = root / "clip.mp4"
+            video.write_bytes(b"0")
+            workdir = root / "work"
+            workdir.mkdir()
+            (workdir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "video": {"path": str(video)},
+                        "settings": {"tts_engine": "kokoro", "voice": "zf_xiaoxiao"},
+                        "settings_snapshot": {
+                            "tts_engine": "kokoro",
+                            "voice": "zf_xiaoxiao",
+                            "style": "旧的默认散文风格",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            parser = build_parser()
+            # Switching engine to qwen3 without --voice clears stale Kokoro voice.
+            tts_args = parser.parse_args(["tts", str(workdir), "--tts", "qwen3"])
+            _, tts_settings, _ = _workdir_context(workdir, tts_args, parser)
+            self.assertEqual(tts_settings.tts_engine, "qwen3")
+            self.assertEqual(tts_settings.voice, "")
+            self.assertEqual(tts_settings.resolved_voice(), "Serena")
+
+            # Passing --style-preset without --style clears stale custom style from manifest.
+            script_args = parser.parse_args(["script", str(workdir), "--style-preset", "oral"])
+            _, script_settings, _ = _workdir_context(workdir, script_args, parser)
+            self.assertEqual(script_settings.style_preset, "oral")
+            self.assertEqual(script_settings.style, "")
 
 
 if __name__ == "__main__":

@@ -268,6 +268,9 @@ class Pipeline:
             duration=self.load_video().duration,
             client=client,
             style=self.settings.style,
+            style_preset=self.settings.resolved_style_preset(),
+            style_guidance=self.settings.resolved_style_guidance(),
+            oral_polish=self.settings.script_oral_polish,
             brief=self.settings.brief,
             cps=self.settings.resolved_speech_chars_per_second(),
             density=self.settings.narration_density,
@@ -278,6 +281,8 @@ class Pipeline:
             self.script_path,
             {
                 "content_language": self.settings.content_language,
+                "style_preset": self.settings.resolved_style_preset(),
+                "style": self.settings.resolved_style(),
                 "segments": [s.to_dict() for s in segments],
             },
         )
@@ -657,7 +662,11 @@ class Pipeline:
                 vlm=settings.vlm_model,
                 llm=settings.llm_model,
                 tts=settings.tts_engine,
-                voice=settings.resolved_voice(),
+                voice=(
+                    f"clone:{Path(settings.tts_ref_audio).name}"
+                    if settings.tts_engine == "qwen3" and settings.tts_ref_audio.strip()
+                    else (settings.resolved_voice() or "custom")
+                ),
             ),
             t(
                 "dry_run.render",
@@ -935,6 +944,9 @@ def _load_segments(data: dict[str, Any]) -> list[NarrationSegment]:
                     start=float(item.get("start") or 0),
                     end=float(item.get("end") or 0),
                     tts_speed=float(item.get("tts_speed") or 1.0),
+                    instruct=str(item.get("instruct") or "").strip(),
+                    voice=str(item.get("voice") or "").strip(),
+                    speed=float(item.get("speed") or 0.0),
                 )
             )
         except (KeyError, TypeError, ValueError):
@@ -1018,6 +1030,11 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
         )
     resolved_asr = settings.resolved_asr_language()
     resolved_voice = settings.resolved_voice()
+    voice_display = (
+        f"clone:{Path(settings.tts_ref_audio).name}"
+        if settings.tts_engine == "qwen3" and settings.tts_ref_audio.strip()
+        else (resolved_voice or "(default)")
+    )
     for axis, value in (
         ("content_language", settings.content_language),
         ("tts_language", settings.tts_language or "(follows content_language)"),
@@ -1025,7 +1042,7 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
             "asr_language",
             settings.asr_language or f"{resolved_asr} (follows content_language)",
         ),
-        ("voice", resolved_voice),
+        ("voice", voice_display),
     ):
         add(f"language.{axis}", axis, str(value), True, required=False)
 
@@ -1036,6 +1053,7 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
             require_voice_match,
             resolve_tts_language,
             supported_tags,
+            voice_language,
         )
 
         profile = resolve_tts_language(
@@ -1049,12 +1067,15 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
         good = profile.status == "supported"
         if not good:
             detail += " (planned, not validated)"
-        else:
+        elif settings.tts_engine == "kokoro":
             try:
                 require_voice_match(profile, resolved_voice)
             except ValueError as exc:
                 detail = str(exc)
                 good = False
+        elif settings.tts_engine == "qwen3" and resolved_voice and voice_language(resolved_voice) is not None:
+            detail = f"voice {resolved_voice!r} is a Kokoro voice; choose a Qwen3 speaker or leave voice empty"
+            good = False
         add("language.tts", "TTS language", detail, good)
     except ValueError as exc:
         add(
@@ -1066,9 +1087,14 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
 
     if profile is not None:
         g2p_ok, g2p_detail = check_tts_dependencies(profile, settings.tts_engine)
+        dep_label = (
+            f"TTS backend ({settings.tts_engine})"
+            if settings.tts_engine != "kokoro"
+            else f"G2P ({profile.tag})"
+        )
         add(
             "module.misaki",
-            f"G2P ({profile.tag})",
+            dep_label,
             g2p_detail,
             g2p_ok,
         )
@@ -1080,6 +1106,15 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
             t("doctor.installed") if misaki else t("doctor.misaki_missing"),
             misaki,
         )
+
+    if settings.tts_engine == "qwen3" and settings.tts_ref_audio.strip():
+        from ..engines.tts import validate_ref_audio
+
+        try:
+            ref_path = validate_ref_audio(settings.tts_ref_audio)
+            add("tts.ref_audio", "TTS ref_audio", str(ref_path), True)
+        except Exception as exc:  # noqa: BLE001
+            add("tts.ref_audio", "TTS ref_audio", str(exc), False)
 
     try:
         with urllib.request.urlopen(f"{settings.ollama_url.rstrip('/')}/api/tags", timeout=4) as resp:

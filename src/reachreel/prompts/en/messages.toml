@@ -17,11 +17,38 @@ mood = "Mood: {value}"
 angle = "Narration angle: {value}"
 none = "none"
 
+[styles]
+oral = "Natural spoken delivery: sound like you are telling a friend about what you just filmed. Use short conversational sentences, contractions, and plain words; avoid poetic metaphors or stiff essay phrasing."
+casual = "Relaxed casual vlog tone: warm, unscripted, and lively, like reacting out loud while walking. Keep lines short and punchy without over-explaining."
+literary = "Restrained literary prose: concise, evocative written narration with deliberate pacing and imagery, suited for slow scenic films without empty adjectives."
+documentary = "Documentary narration: calm, grounded, and clear. Focus on concrete spatial details, environment, and action without hype or casual filler."
+commentary = "Engaging creator commentary: open with a crisp hook, keep momentum across cuts, and guide the viewer's attention to key details without rambling."
+
+[style_guidance]
+oral = """Spoken-script rules:
+- Favor short, breathable sentences (6-16 words) and everyday contractions (you're, it's, didn't) so it sounds spoken, not read from an essay.
+- Avoid purple prose, stacked metaphors, and formal broadcast clichés.
+- Bad (too written): "A crimson umbrella trembles against the rising mist of the ancient gorge."
+- Good (natural speech): "The wind gets so strong here the umbrellas nearly flip inside out, and the mist hits you right in the face." """
+casual = """Casual vlog rules:
+- React naturally as if talking while walking; keep lines brisk, honest, and easy to say out loud.
+- Skip generic filler like "This is amazing" or "Let's check it out." """
+literary = """Literary prose rules:
+- Keep the written elegance, restraint, and imagery, while staying strictly grounded in what is visible on screen."""
+documentary = """Documentary rules:
+- Maintain a steady, objective, well-structured narration focused on actions, setting, and progression."""
+commentary = """Commentary rules:
+- Open with an immediate hook in the first 3 seconds and keep narrative momentum across scenes with conversational clarity."""
+custom = """Custom style rule:
+- Follow the requested style faithfully while keeping every line natural to voice aloud."""
+
 [script]
 context_label = "Video context: {context}\n"
 fallback_intro = "A quiet landscape opens the film."
 fallback_start = "The film opens on a quiet landscape."
-condense_instruction = "The following English narration is too long. Compress it to about {target_chars} characters without losing visual information or inventing content. Keep the segment order and the JSON format:\n"
+condense_instruction = "The following English narration is too long. Compress it to about {target_chars} characters without losing visual information or inventing content. Keep the tone, segment order, and the JSON format:\n"
 condense_ending = "\nReturn only a JSON array: [{\"scene_ids\":[1,2],\"text\":\"...\"}]."
-expand_instruction = "The following English narration is too short and may not reach the ending. Expand it to about {target_chars} characters (video {duration:.1f}s) without inventing visual information. Add detail about actions, environment, and visual changes. Fill the middle and end in chronological order; the last segment should land 5-12 seconds before the video ends. Keep the JSON format:\n"
+expand_instruction = "The following English narration is too short and may not reach the ending. Expand it to about {target_chars} characters (video {duration:.1f}s) without inventing visual information. Add detail about actions, environment, and visual changes. Fill the middle and end in chronological order; the last segment should land 5-12 seconds before the video ends. Keep the tone and the JSON format:\n"
 expand_ending = "\nReturn only a JSON array: [{\"scene_ids\":[1,2],\"text\":\"...\"}]."
+polish_instruction = "Rewrite the following English narration so it sounds completely natural when spoken aloud by a real person.\nRequirements:\n1. Keep the requested style: {style}\n2. Replace stiff written phrasing, over-poetic metaphors, or awkward long clauses with natural, speakable phrasing and clean pauses.\n3. Keep the same scene_ids, factual meaning, and roughly {target_chars} characters total. Do not invent facts or add meta phrases.\n\nDraft:\n"
+polish_ending = "\nReturn only a JSON array: [{\"scene_ids\":[1,2],\"text\":\"...\"}]."

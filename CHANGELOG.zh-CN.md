@@ -6,6 +6,9 @@
 
 ### 新增
 
+- 新增说话风格预设 `style_preset` / `--style-preset`（`oral`、`casual`、`literary`、`documentary`、`commentary`，默认 `oral` 真人口语）、自定义风格覆盖 `style` / `--style`，以及口语润色开关 `script_oral_polish` / `--oral-polish` / `--no-oral-polish`，配合更具体口语化的 VLM 看片提示词（`vf-vlm-3`）减少字幕与台词的书面腔。
+- 基于 `mlx-audio` 接入 `Qwen3TTSEngine`（`tts_engine = "qwen3"` / `--tts qwen3`），支持 `CustomVoice` 预设音色（`Serena`、`Vivian`、`Uncle_Fu`、`Dylan`、`Eric`、`Ryan`、`Aiden`）加自然语言 `tts_instruct` 控制、`VoiceDesign` 音色设计，以及 `Base` 模型零样本声音克隆（`tts_ref_audio` / `tts_ref_text`）。
+- 支持完整的声音与声学参数配置：支持配置文件 `[tts]` 表或顶级 `tts_*` 键、CLI 参数（`--qwen3-model`、`--tts-speed`、`--tts-instruct`、`--tts-ref-audio`、`--tts-ref-text`、`--tts-temperature`、`--tts-top-p`、`--tts-top-k`、`--tts-repetition-penalty`、`--tts-seed`、`--tts-chunk-pause`、`--tts-pitch`、`--tts-volume`）、`script.json` 片段级 `voice`/`instruct`/`speed` 覆盖，以及 Kokoro 逗号混音与 `reachreel voices` 命令。
 - 支持英文旁白、英文配音与英文字幕（`en-US` 与 `en-GB` 在 `src/reachreel/languages.py` 中升级为 `supported`）。运行 `reachreel run video.mp4 --content-language en`（或 `--tts-language en-GB`）时会自动解析整套英文配置：口播估算语速（`14.5` 字符/秒）、默认 Kokoro 音色（`af_heart` / `bf_emma`）、默认 macOS `say` 音色（`Samantha` / `Daniel`）、Whisper `en` 提示、字幕行宽（`42` 字符）、拉丁字体（`Helvetica Neue`）以及软字幕轨元数据（`language=eng`）。
 - 在 `pyproject.toml` 新增无 torch 的可选依赖 `tts-en`（`spacy`、`num2words`、`espeakng-loader`、`phonemizer-fork`），与 `mlx-audio` 非 transformer 的 `KokoroPipeline`（`trf=False` + `en_core_web_sm` + `EspeakFallback`）一致；同时提供中文语言组 `tts-zh`。
 - `_split_for_tts` 适配英文切段（按句末/从句标点与空格切分，单段上限 250 字符，不再在 70 字符处腰斩单词），`media/subtitles.py` 支持按英文句读切分与双行均衡换行。

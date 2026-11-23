@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from .. import __version__
-from ..core.config import Settings
+from ..core.config import STYLE_PRESETS, Settings
 from ..core.util import read_json, setup_logging
 from ..i18n import negotiate_language, set_language, supported_languages, t
 from ..pipeline.orchestrator import Pipeline, doctor
@@ -36,8 +36,23 @@ def _overrides(args: argparse.Namespace) -> dict:
         "voice": getattr(args, "voice", None),
         "tts_engine": getattr(args, "tts", None),
         "tts_language": getattr(args, "tts_language", None),
+        "qwen3_model": getattr(args, "qwen3_model", None),
+        "tts_speed": getattr(args, "tts_speed", None),
+        "tts_instruct": getattr(args, "tts_instruct", None),
+        "tts_ref_audio": getattr(args, "tts_ref_audio", None),
+        "tts_ref_text": getattr(args, "tts_ref_text", None),
+        "tts_temperature": getattr(args, "tts_temperature", None),
+        "tts_top_p": getattr(args, "tts_top_p", None),
+        "tts_top_k": getattr(args, "tts_top_k", None),
+        "tts_repetition_penalty": getattr(args, "tts_repetition_penalty", None),
+        "tts_seed": getattr(args, "tts_seed", None),
+        "tts_chunk_pause_seconds": getattr(args, "tts_chunk_pause", None),
+        "tts_pitch": getattr(args, "tts_pitch", None),
+        "tts_volume": getattr(args, "tts_volume", None),
         "whisper_model": getattr(args, "whisper_model", None),
+        "style_preset": getattr(args, "style_preset", None),
         "style": getattr(args, "style", None),
+        "script_oral_polish": getattr(args, "oral_polish", None),
         "brief": getattr(args, "brief", None),
         "narration_density": getattr(args, "density", None),
         "max_speedup": getattr(args, "max_speedup", None),
@@ -95,9 +110,22 @@ def _workdir_context(
             setattr(settings, key, value)
 
     # CLI wins over config/manifest; env is applied by Settings.load before this point.
-    for key, value in _overrides(args).items():
+    overrides = _overrides(args)
+    prev_engine = settings.tts_engine
+    for key, value in overrides.items():
         if value is not None and hasattr(settings, key):
             setattr(settings, key, value)
+    # Switching engine or enabling reference-audio cloning without an explicit
+    # --voice must not carry over a stale voice from the previous engine.
+    if overrides.get("voice") is None and (
+        (overrides.get("tts_engine") is not None and settings.tts_engine != prev_engine)
+        or (overrides.get("tts_ref_audio") and settings.tts_engine == "qwen3")
+    ):
+        settings.voice = ""
+    # Explicitly choosing --style-preset without --style clears any old custom
+    # style stored in manifest.json so the requested preset takes effect.
+    if overrides.get("style_preset") is not None and overrides.get("style") is None:
+        settings.style = ""
 
     return video, settings, manifest
 
@@ -135,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--vlm-model", default=None)
         p.add_argument("--llm-model", default=None)
         p.add_argument("--voice", default=None, help=t("cli.voice"))
-        p.add_argument("--tts", choices=["kokoro", "say"], default=None)
+        p.add_argument("--tts", choices=["kokoro", "qwen3", "say"], default=None)
         p.add_argument("--tts-language", default=None, help=t("cli.tts_language"))
         p.add_argument("--whisper-model", default=None)
         p.add_argument("--vlm-workers", type=int, default=None, help=t("cli.vlm_workers"))
@@ -150,8 +178,40 @@ def build_parser() -> argparse.ArgumentParser:
             help=t("cli.scene_threshold"),
         )
 
+    def tts_options(p: argparse.ArgumentParser) -> None:
+        p.add_argument("--qwen3-model", default=None, help=t("cli.qwen3_model"))
+        p.add_argument("--tts-speed", type=float, default=None, help=t("cli.tts_speed"))
+        p.add_argument("--tts-instruct", default=None, help=t("cli.tts_instruct"))
+        p.add_argument("--tts-ref-audio", default=None, help=t("cli.tts_ref_audio"))
+        p.add_argument("--tts-ref-text", default=None, help=t("cli.tts_ref_text"))
+        p.add_argument("--tts-temperature", type=float, default=None, help=t("cli.tts_temperature"))
+        p.add_argument("--tts-top-p", type=float, default=None, help=t("cli.tts_top_p"))
+        p.add_argument("--tts-top-k", type=int, default=None, help=t("cli.tts_top_k"))
+        p.add_argument(
+            "--tts-repetition-penalty",
+            type=float,
+            default=None,
+            help=t("cli.tts_repetition_penalty"),
+        )
+        p.add_argument("--tts-seed", type=int, default=None, help=t("cli.tts_seed"))
+        p.add_argument("--tts-chunk-pause", type=float, default=None, help=t("cli.tts_chunk_pause"))
+        p.add_argument("--tts-pitch", type=float, default=None, help=t("cli.tts_pitch"))
+        p.add_argument("--tts-volume", type=float, default=None, help=t("cli.tts_volume"))
+
     def script_options(p: argparse.ArgumentParser) -> None:
+        p.add_argument(
+            "--style-preset",
+            choices=list(STYLE_PRESETS),
+            default=None,
+            help=t("cli.style_preset"),
+        )
         p.add_argument("--style", default=None, help=t("cli.style"))
+        p.add_argument(
+            "--oral-polish",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=t("cli.oral_polish"),
+        )
         p.add_argument("--brief", default=None, help=t("cli.brief"))
         p.add_argument(
             "--density",
@@ -230,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help=t("cli.run"))
     common(run)
     script_options(run)
+    tts_options(run)
     subtitle_options(run)
     bgm_options(run)
     run.add_argument("video", type=Path)
@@ -278,6 +339,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     tts = sub.add_parser("tts", help=t("cli.tts"))
     common(tts)
+    tts_options(tts)
     tts.add_argument("workdir", type=Path)
 
     subtitle = sub.add_parser("subtitle", help=t("cli.subtitle"))
@@ -360,10 +422,21 @@ def build_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         help=t("cli.content_language"),
     )
-    doc.add_argument("--tts", choices=["kokoro", "say"], default=None)
+    doc.add_argument("--tts", choices=["kokoro", "qwen3", "say"], default=None)
     doc.add_argument("--tts-language", default=None, help=t("cli.tts_language"))
     doc.add_argument("--voice", default=None, help=t("cli.voice"))
+    doc.add_argument("--qwen3-model", default=None, help=t("cli.qwen3_model"))
+    doc.add_argument("--tts-ref-audio", default=None, help=t("cli.tts_ref_audio"))
     doc.add_argument("--json", action="store_true", help=t("cli.json"))
+
+    voices = sub.add_parser("voices", help=t("cli.voices"))
+    voices.add_argument(
+        "--tts",
+        choices=["kokoro", "qwen3", "all"],
+        default="all",
+        help=t("cli.voices_tts"),
+    )
+    voices.add_argument("--json", action="store_true", help=t("cli.json"))
 
     licenses = sub.add_parser("licenses", help=t("cli.licenses"))
     licenses.add_argument("workdir", type=Path)
@@ -405,6 +478,42 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         settings = _settings(args)
         return doctor(settings, as_json=args.json)
+
+    if args.command == "voices":
+        from ..engines.tts import (
+            KOKORO_EN_GB_VOICES,
+            KOKORO_EN_US_VOICES,
+            KOKORO_ZH_VOICES,
+            QWEN3_EN_VOICES,
+            QWEN3_ZH_VOICES,
+        )
+
+        payload = {
+            "style_presets": list(STYLE_PRESETS),
+            "voices": {
+                "kokoro": {
+                    "zh-CN": KOKORO_ZH_VOICES,
+                    "en-US": KOKORO_EN_US_VOICES,
+                    "en-GB": KOKORO_EN_GB_VOICES,
+                },
+                "qwen3": {
+                    "zh-CN": QWEN3_ZH_VOICES,
+                    "en-US": QWEN3_EN_VOICES,
+                    "en-GB": QWEN3_EN_VOICES,
+                },
+            },
+        }
+        if args.tts != "all":
+            payload["voices"] = {args.tts: payload["voices"][args.tts]}
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return 0
+        print(t("voices.style_presets", presets=", ".join(payload["style_presets"])))
+        for engine_name, groups in payload["voices"].items():
+            print(f"\n[{engine_name}]")
+            for tag, names in groups.items():
+                print(f"  {tag}: {', '.join(names)}")
+        return 0
 
     if args.command == "run":
         if not args.video.exists():

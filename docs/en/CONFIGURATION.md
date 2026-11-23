@@ -93,7 +93,9 @@ Tuning suggestions:
 
 | Field | Default | Description |
 |---|---|---|
-| `style` | Empty = `prompts/<lang>/style.txt` | Narration style hint; empty uses the language default |
+| `style_preset` | `oral` | Speaking style preset: `oral` (natural spoken conversation), `casual` (relaxed vlog), `literary` (written prose), `documentary` (steady broadcast), `commentary` (creator storytelling) |
+| `style` | Empty | Custom narration style prompt; when non-empty, overrides `style_preset` |
+| `script_oral_polish` | `true` | Run a spoken-delivery polish pass when using a spoken preset (`oral`, `casual`, `commentary`) without a custom `style` |
 | `brief` | Empty | Background such as shooting location, people, and activities; strongly recommended |
 | `speech_chars_per_second` | `0.0` | Speech-rate estimate for the target character count; `0` follows the content language (`3.9` for `zh-CN`, `14.5` for `en`) |
 | `narration_density` | `0.62` | Narration density 0.2–1.0; 0.4 is more vlog-like, 0.75 is more documentary-like |
@@ -116,12 +118,35 @@ For example, 90 seconds at 3.9 characters/second and 0.5 density → about 175 c
 
 | Field | Default | Description |
 |---|---|---|
-| `tts_engine` | `kokoro` | `kokoro` or `say` (for macOS debugging) |
-| `tts_language` | `""` | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`, `en-GB`, ...). Empty follows `content_language`. Engine codes stay internal, and a voice whose language disagrees is rejected; see [LANGUAGES.md](LANGUAGES.md). `zh-CN`, `en-US`, and `en-GB` are validated for `kokoro` |
+| `tts_engine` | `kokoro` | `kokoro`, `qwen3` (expressive CustomVoice / VoiceDesign / Base cloning via MLX), or `say` (macOS debug fallback) |
+| `tts_language` | `""` | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`, `en-GB`, ...). Empty follows `content_language`. Engine codes stay internal, and a voice whose language disagrees is rejected; see [LANGUAGES.md](LANGUAGES.md). `zh-CN`, `en-US`, and `en-GB` are validated for `kokoro` and `qwen3` |
 | `kokoro_model` | `mlx-community/Kokoro-82M-4bit` | Kokoro MLX model |
-| `voice` | `""` | Kokoro voice; empty follows the resolved language (`zf_xiaoxiao` for `zh-CN`, `af_heart` for `en-US`, `bf_emma` for `en-GB`). The prefix carries the language (`zf_`/`zm_` Mandarin, `af_`/`am_` American English, `bf_`/`bm_` British English) |
-| `tts_speed` | `1.0` | Base speech rate; 1.0 is normal, >1 is faster |
+| `qwen3_model` | `""` | Qwen3-TTS MLX model; empty auto-selects `mlx-community/Qwen3-TTS-12Hz-1.7B-CustomVoice-6bit` (or `mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16` when `tts_ref_audio` is set) |
+| `voice` | `""` | Voice name; empty follows the resolved language and engine (`zf_xiaoxiao`/`af_heart`/`bf_emma` for `kokoro`; `Serena`/`Ryan` for `qwen3`). Kokoro also accepts comma-separated voice blending such as `zf_xiaoxiao,zf_xiaoni` |
+| `tts_speed` | `1.0` | Base speech rate; `1.0` is normal, `>1` is faster |
+| `tts_instruct` | `""` | Natural-language emotion/delivery instruction for Qwen3 `CustomVoice`, or voice description for `VoiceDesign` |
+| `tts_ref_audio` | `""` | 5–10 s reference audio path for Qwen3 `Base` zero-shot voice cloning |
+| `tts_ref_text` | `""` | Exact transcript of `tts_ref_audio` for higher-fidelity cloning |
+| `tts_temperature` | `0.0` | Sampling temperature for generative TTS (`0` uses model default) |
+| `tts_top_p` | `0.0` | Nucleus sampling `top_p` (`0` uses model default) |
+| `tts_top_k` | `0` | Top-k sampling (`0` uses model default) |
+| `tts_repetition_penalty` | `0.0` | Repetition penalty (`0` uses model default) |
+| `tts_seed` | `-1` | Fixed RNG seed (`>= 0` for reproducible synthesis; `-1` is random) |
+| `tts_chunk_pause_seconds` | `0.12` | Silence pause in seconds between split sub-chunks within one segment |
+| `tts_pitch` | `0.0` | Pitch shift in semitones (e.g. `-1.5` to `+1.5`; `0` disables) |
+| `tts_volume` | `1.0` | Pre-mix narration gain multiplier (`1.0` = unity) |
 | `say_voice` | `""` | Voice for the `say` engine; empty follows the resolved language (`Tingting`, `Samantha`, `Daniel`) |
+
+Qwen3-TTS voices (`CustomVoice`):
+
+| Voice | Language / style |
+|---|---|
+| `Serena` / `Vivian` | Chinese (default `Serena`), warm / bright female |
+| `Uncle_Fu` | Chinese, mature male |
+| `Dylan` / `Eric` | Chinese, Beijing / Sichuan dialect |
+| `Ryan` / `Aiden` | English (default `Ryan`), male |
+
+You can also place a `[tts]` table in `config.toml` (for example `engine = "qwen3"`, `speed = 0.95`, `instruct = "..."`, `ref_audio = "..."`), or override `voice`, `instruct`, and `speed` on individual items inside `script.json` before running `reachreel tts <workdir>`.
 
 Kokoro Chinese voices (`zh-CN`):
 

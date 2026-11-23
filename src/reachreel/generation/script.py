@@ -105,7 +105,22 @@ def _normalise_segments(
             scene_ids = [min(cursor, max_id)]
         scene_ids.sort()
         cursor = max(scene_ids) + 1
-        result.append(NarrationSegment(id=len(result) + 1, scene_ids=scene_ids, text=text))
+        instruct = str(item.get("instruct") or "").strip()
+        voice = str(item.get("voice") or "").strip()
+        try:
+            speed = float(item.get("speed") or 0.0)
+        except (TypeError, ValueError):
+            speed = 0.0
+        result.append(
+            NarrationSegment(
+                id=len(result) + 1,
+                scene_ids=scene_ids,
+                text=text,
+                instruct=instruct,
+                voice=voice,
+                speed=max(0.0, speed),
+            )
+        )
     return result
 
 
@@ -207,12 +222,58 @@ def _expand_prompt(
     )
 
 
+def _polish_prompt(
+    segments: list[NarrationSegment],
+    style: str,
+    target_chars: int,
+    content_language: str = "zh",
+) -> str:
+    payload = [{"scene_ids": s.scene_ids, "text": s.text} for s in segments]
+    return (
+        text(
+            content_language,
+            "script.polish_instruction",
+            style=style,
+            target_chars=target_chars,
+        )
+        + json.dumps(payload, ensure_ascii=False, indent=2)
+        + text(content_language, "script.polish_ending")
+    )
+
+
+def _rewrite_segments(
+    client: OllamaClient,
+    prompt: str,
+    *,
+    temperature: float,
+    max_tokens: int,
+    scenes: list[Scene],
+    content_language: str,
+    label: str,
+) -> list[NarrationSegment] | None:
+    """Ask the LLM to revise an existing draft, returning None on error or empty parse."""
+    try:
+        raw = client.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("%s failed; keeping the previous script: %s", label, exc)
+        return None
+    revised = _normalise_segments(_extract_json_array(raw), scenes, content_language)
+    return revised or None
+
+
 def generate_script(
     scenes: list[Scene],
     *,
     duration: float,
     client: OllamaClient,
     style: str,
+    style_preset: str = "oral",
+    style_guidance: str = "",
+    oral_polish: bool = True,
     brief: str = "",
     cps: float = 3.9,
     density: float = 0.62,
@@ -221,7 +282,21 @@ def generate_script(
 ) -> list[NarrationSegment]:
     target_chars = max(12, int(duration * cps * clamp(density, 0.2, 1.0)))
     min_segments = max(1, min(10, round(duration / 14)))
-    style = style.strip() or load_prompt(content_language, "style").strip()
+    custom_style = bool(style.strip())
+    if custom_style:
+        resolved_style = style.strip()
+    else:
+        preset_key = f"styles.{style_preset}"
+        preset_value = text(content_language, preset_key)
+        resolved_style = (
+            preset_value.strip()
+            if preset_value != preset_key and preset_value.strip()
+            else load_prompt(content_language, "style").strip()
+        )
+    if not style_guidance.strip():
+        guidance_key = "style_guidance.custom" if custom_style else f"style_guidance.{style_preset}"
+        guidance_value = text(content_language, guidance_key)
+        style_guidance = "" if guidance_value == guidance_key else guidance_value.strip()
     context = (
         text(content_language, "script.context_label", context=brief)
         if brief
@@ -234,7 +309,8 @@ def generate_script(
         cps=cps,
         duration=duration,
         min_segments=min_segments,
-        style=style,
+        style=resolved_style,
+        style_guidance=style_guidance,
     )
     LOG.info("Writing narration with the local LLM (target about %d characters)...", target_chars)
     raw = client.chat(
@@ -243,51 +319,60 @@ def generate_script(
         max_tokens=max(1200, target_chars * 3),
     )
     segments = _normalise_segments(_extract_json_array(raw), scenes, content_language)
+    used_fallback = False
     if not segments:
         LOG.warning("LLM output could not be parsed; using the scene summary fallback. Raw output: %s", raw[:300])
         segments = _fallback_segments(scenes, target_chars, content_language)
+        used_fallback = True
 
     total_chars = sum(len(segment.text) for segment in segments)
     if total_chars > target_chars * 1.22 and total_chars > 40:
         LOG.info("Narration is too long (%d chars); asking the LLM to compress to about %d...", total_chars, target_chars)
-        try:
-            raw2 = client.chat(
-                [
-                    {
-                        "role": "user",
-                        "content": _condense_prompt(segments, target_chars, content_language),
-                    }
-                ],
-                temperature=0.3,
-                max_tokens=max(1000, target_chars * 3),
-            )
-            condensed = _normalise_segments(_extract_json_array(raw2), scenes, content_language)
-            if condensed:
-                segments = condensed
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("Compression failed; keeping the original script: %s", exc)
+        condensed = _rewrite_segments(
+            client,
+            _condense_prompt(segments, target_chars, content_language),
+            temperature=0.3,
+            max_tokens=max(1000, target_chars * 3),
+            scenes=scenes,
+            content_language=content_language,
+            label="Compression",
+        )
+        if condensed:
+            segments = condensed
 
     total_chars = sum(len(segment.text) for segment in segments)
     if duration > 25 and total_chars < target_chars * 0.72:
         LOG.info("Narration is too short (%d chars); asking the LLM to expand to about %d...", total_chars, target_chars)
-        try:
-            raw3 = client.chat(
-                [
-                    {
-                        "role": "user",
-                        "content": _expand_prompt(
-                            segments, target_chars, duration, content_language
-                        ),
-                    }
-                ],
-                temperature=0.6,
-                max_tokens=max(1200, target_chars * 3),
-            )
-            expanded = _normalise_segments(_extract_json_array(raw3), scenes, content_language)
-            if expanded and sum(len(s.text) for s in expanded) > total_chars:
-                segments = expanded
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("Expansion failed; keeping the original script: %s", exc)
+        expanded = _rewrite_segments(
+            client,
+            _expand_prompt(segments, target_chars, duration, content_language),
+            temperature=0.6,
+            max_tokens=max(1200, target_chars * 3),
+            scenes=scenes,
+            content_language=content_language,
+            label="Expansion",
+        )
+        if expanded and sum(len(s.text) for s in expanded) > total_chars:
+            segments = expanded
+
+    if (
+        oral_polish
+        and not used_fallback
+        and not custom_style
+        and style_preset in {"oral", "casual", "commentary"}
+    ):
+        LOG.info("Polishing script for natural spoken delivery (%s)...", style_preset)
+        polished = _rewrite_segments(
+            client,
+            _polish_prompt(segments, resolved_style, target_chars, content_language),
+            temperature=0.45,
+            max_tokens=max(1200, target_chars * 3),
+            scenes=scenes,
+            content_language=content_language,
+            label="Oral polish",
+        )
+        if polished:
+            segments = polished
 
     for index, segment in enumerate(segments, start=1):
         segment.id = index

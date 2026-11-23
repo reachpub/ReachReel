@@ -17,8 +17,11 @@ min_scene_seconds = 1.2
 max_scene_seconds = 8.0
 max_scenes = 160
 
-# Narration style prompt. Empty = language-specific default from prompts/<lang>/style.txt.
+# Speaking style preset: oral | casual | literary | documentary | commentary
+style_preset = "oral"
+# Custom narration style prompt. Non-empty overrides style_preset.
 style = ""
+script_oral_polish = true
 brief = ""
 speech_chars_per_second = 0.0  # 0 = language default (3.9 for zh-CN, 14.5 for en)
 narration_density = 0.62
@@ -27,12 +30,25 @@ start_offset = 0.7
 tail_padding = 0.8
 max_speedup = 1.32
 
-tts_engine = "kokoro"        # kokoro | say (say is a macOS debug fallback)
+tts_engine = "kokoro"        # kokoro | qwen3 | say (say is a macOS debug fallback)
 tts_language = ""            # BCP 47 tag for the voiceover, e.g. "zh-CN", "en-US", "en-GB"; empty follows content_language
 asr_language = ""            # Whisper hint; empty follows the content_language primary subtag
 kokoro_model = "mlx-community/Kokoro-82M-4bit"
-voice = ""                   # empty = language default (zf_xiaoxiao, af_heart, bf_emma)
+# Empty = auto (1.7B-CustomVoice-6bit, or 0.6B-Base-bf16 when tts_ref_audio is set)
+qwen3_model = ""
+voice = ""                   # empty = default (Kokoro: zf_xiaoxiao/af_heart; Qwen3: Serena/Ryan); Kokoro supports comma blending
 tts_speed = 1.0
+tts_instruct = ""            # delivery/emotion instruction (Qwen3 CustomVoice) or voice description (VoiceDesign)
+tts_ref_audio = ""           # 5-10s reference audio path for Qwen3 Base voice cloning
+tts_ref_text = ""            # exact transcript of tts_ref_audio
+tts_temperature = 0.0        # generative TTS sampling temperature (0 = model default)
+tts_top_p = 0.0              # generative TTS top-p (0 = model default)
+tts_top_k = 0                # generative TTS top-k (0 = model default)
+tts_repetition_penalty = 0.0 # generative TTS repetition penalty (0 = model default)
+tts_seed = -1                # >= 0 fixes the RNG seed for reproducible TTS
+tts_chunk_pause_seconds = 0.12  # silence pause in seconds between split chunks within a segment
+tts_pitch = 0.0              # pitch shift in semitones (e.g. -1.5 to +1.5)
+tts_volume = 1.0             # pre-mix narration gain multiplier
 say_voice = ""               # empty = language default (Tingting, Samantha, Daniel)
 
 whisper_model = "mlx-community/whisper-large-v3-turbo"

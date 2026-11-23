@@ -18,7 +18,7 @@ from ..prompts import load_prompt, text
 
 LOG = logging.getLogger("reachreel.engines.vlm")
 
-PROMPT_VERSION = "vf-vlm-2"
+PROMPT_VERSION = "vf-vlm-3"
 
 
 class OllamaError(RuntimeError):
