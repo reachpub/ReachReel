@@ -78,7 +78,7 @@ reachreel = "reachreel.cli.main:main"
 [project.urls]
 Homepage = "https://github.com/reachpub/ReachReel"
 Repository = "https://github.com/reachpub/ReachReel"
-Documentation = "https://github.com/reachpub/ReachReel/blob/main/docs/README.md"
+Documentation = "https://reachpub.github.io/ReachReel"
 Changelog = "https://github.com/reachpub/ReachReel/blob/main/CHANGELOG.md"
 Issues = "https://github.com/reachpub/ReachReel/issues"
 
