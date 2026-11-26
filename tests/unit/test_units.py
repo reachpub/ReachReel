@@ -994,7 +994,9 @@ class UnitTests(unittest.TestCase):
                     sample_rate=24000,
                 )
 
-        with tempfile.TemporaryDirectory() as tmp:
+        with tempfile.TemporaryDirectory() as tmp, patch(
+            "reachreel.engines.tts.check_tts_dependencies", return_value=(True, "")
+        ):
             out = Path(tmp) / "out.wav"
             settings = Settings(
                 tts_engine="qwen3",
@@ -1017,12 +1019,12 @@ class UnitTests(unittest.TestCase):
 
             # VoiceDesign requires instruct.
             engine._model = FakeModel("voice_design")
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "VoiceDesign model requires tts_instruct"):
                 engine.synthesize("测试。", out, instruct="")
 
             # Base cloning requires ref_audio.
             engine._model = FakeModel("base")
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Base model requires tts_ref_audio"):
                 engine.synthesize("测试。", out)
 
             ref_wav = Path(tmp) / "ref.wav"
