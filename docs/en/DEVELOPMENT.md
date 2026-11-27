@@ -679,20 +679,26 @@ apdev check-imports                                      # dependency direction 
 apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel -name '*.py')
 ```
 
-`apdev` is the shared APCore development toolkit (`apdev[dev]>=0.2.5`, configured through `[tool.apdev]` in `pyproject.toml`). Two things to know:
+ReachReel uses `apdev[dev]>=0.2.8` for the APCore development tools and configures them under `[tool.apdev]` in `pyproject.toml`.
 
 - `check-chars` is ASCII + emoji + explicitly allowed ranges. `scripts/apdev_charset.json` adds the CJK punctuation blocks (`0x3000-0x303F`, `0xFF00-0xFFEF`) because the splitters use the full-width sentence marks as data, while Chinese ideographs stay illegal outside `locales/` and `prompts/`;
 - test fixtures legitimately contain Chinese, so only `src/reachreel/**/*.py` is checked. Run `apdev check-chars --charset chinese tests/` to scan them too.
 
 ### Releases
 
-`[tool.apdev]` also feeds `apdev release`, which verifies that `pyproject.toml` and `reachreel.__version__` agree, builds with `python -m build`, runs `twine check`, and then offers the tag / GitHub-release / PyPI steps. Cut the version first, then hand over:
+`apdev release` uses `[tool.apdev]` to verify that `pyproject.toml` and `reachreel.__version__` agree. It builds with `python -m build`, runs `twine check`, and prompts before tagging, creating a GitHub release, and uploading to PyPI.
 
 1. Set the release heading to `## [x.y.z] - YYYY-MM-DD` in both changelogs. If the version already has a pending section, add the release date and remove its unpublished note.
-2. Set `version` in `pyproject.toml` and reinstall the editable package so `reachreel.__version__` reads the new installed metadata.
-3. Run `apdev release` (add `--yes` for the non-interactive path).
+2. Set `version` in `pyproject.toml`.
+3. From the repository root, run the release command:
 
-Tags use a `v` prefix (`v0.3.0`).
+   ```bash
+   uv run --extra dev --with twine apdev release
+   ```
+
+`uv run` refreshes the editable installation. `--extra dev` installs the project's `apdev` and its `build` dependency. `--with twine` makes Twine available to check and upload the distribution. Append `--yes` to approve all release steps automatically.
+
+`apdev release` creates tags such as `python/v0.5.0`.
 
 **Cadence**: release when a version is worth announcing, not per commit. One release per day is the ceiling, and it should carry a meaningful iteration — a new capability, a user-visible behaviour change, or a batch of fixes worth a version number. Documentation, CI and tooling changes accumulate in the pending changelog section until the next release.
 

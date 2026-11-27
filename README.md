@@ -163,6 +163,14 @@ reachreel export output/my-job --format mov --out output/my-job-prores
 
 ## For developers
 
+Install the project and its developer tools with uv:
+
+```bash
+uv sync --python 3.12 --extra dev
+```
+
+Follow the [release instructions](docs/en/DEVELOPMENT.md#releases) to build and publish a version.
+
 ```text
 video -> FFmpeg scene detection -> Ollama qwen3-vl vision
       -> local LLM narration -> Kokoro-82M (MLX) voiceover

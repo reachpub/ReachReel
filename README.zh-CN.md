@@ -163,6 +163,14 @@ reachreel export output/my-job --format mov --out output/my-job-prores
 
 ## 面向开发者
 
+使用 uv 安装项目和开发工具：
+
+```bash
+uv sync --python 3.12 --extra dev
+```
+
+打包和发布版本的步骤见[发布指南](docs/zh-CN/DEVELOPMENT.md#发布)。
+
 ```text
 视频 → FFmpeg 镜头检测 → Ollama qwen3-vl 画面理解
      → 本地 LLM 生成旁白 → Kokoro-82M (MLX) 配音

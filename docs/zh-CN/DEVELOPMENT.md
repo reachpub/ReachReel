@@ -679,20 +679,26 @@ apdev check-imports                                      # 依赖方向保持无
 apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel -name '*.py')
 ```
 
-`apdev` 是 APCore 系列共用的开发工具包（`apdev[dev]>=0.2.5`，通过 `pyproject.toml` 的 `[tool.apdev]` 配置）。两点说明：
+ReachReel 使用 `apdev[dev]>=0.2.8` 提供的 APCore 开发工具，并通过 `pyproject.toml` 的 `[tool.apdev]` 配置。
 
 - `check-chars` 默认只允许 ASCII + emoji + 白名单范围。`scripts/apdev_charset.json` 放行 CJK 标点区（`0x3000-0x303F`、`0xFF00-0xFFEF`），因为切分逻辑把全角句末标点当数据用；汉字在 `locales/` 与 `prompts/` 之外仍然非法；
 - 测试 fixture 本来就含中文，所以只检查 `src/reachreel/**/*.py`。想连测试一起扫时用 `apdev check-chars --charset chinese tests/`。
 
 ### 发布
 
-`[tool.apdev]` 同时供 `apdev release` 使用：它会校验 `pyproject.toml` 与 `reachreel.__version__` 一致，用 `python -m build` 打包、跑 `twine check`，然后逐步提供打 tag / 建 GitHub release / 上传 PyPI。先收口版本，再交给它：
+`apdev release` 使用 `[tool.apdev]` 的配置，校验 `pyproject.toml` 与 `reachreel.__version__` 一致，用 `python -m build` 打包并运行 `twine check`，然后在打 tag、创建 GitHub Release 和上传 PyPI 前分别询问确认。
 
 1. 将两份变更记录的发布标题设为 `## [x.y.z] - YYYY-MM-DD`。如果已有待发布版本段，补上发布日期并移除待发布说明。
-2. 在 `pyproject.toml` 中设置 `version`，然后重新安装可编辑包，使 `reachreel.__version__` 读取新的安装元数据。
-3. 执行 `apdev release`（非交互时加 `--yes`）。
+2. 在 `pyproject.toml` 中设置 `version`。
+3. 在仓库根目录运行发布命令：
 
-tag 采用 `v` 前缀（`v0.3.0`）。
+   ```bash
+   uv run --extra dev --with twine apdev release
+   ```
+
+`uv run` 会刷新可编辑安装。`--extra dev` 安装项目声明的 `apdev` 及其 `build` 依赖。`--with twine` 提供检查和上传发行包所需的 Twine。要自动确认所有发布步骤，可在命令末尾加上 `--yes`。
+
+`apdev release` 创建的 tag 格式为 `python/v0.5.0`。
 
 **节奏**：值得对外宣布时才发版，不要每个提交都发。上限是一天一次，并且要带一次有意义的迭代——新能力、用户可见的行为变化，或一批值得单独给版本号的修复。文档、CI 和工具类改动先积攒在待发布段，随下一版本发布。
 
