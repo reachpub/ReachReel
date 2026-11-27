@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
 
+from ..core.config import public_ollama_url
 from ..core.util import (
     LOG,
     atomic_write_json,
@@ -25,6 +26,7 @@ from ..domain.models import QualityFlag, merge_quality_flags
 from ..i18n import t
 from ..languages import PROFILES, profile_for
 from ..media.subtitles import SUBTITLE_PRESETS
+from .stage_inputs import RENDER_STAGES, StageInputs
 
 PASS = "pass"
 WARN = "warn"
@@ -589,6 +591,17 @@ def run_qa(
         _add(checks, "output_exists", FAIL, t("qa.output_missing", output=output))
         return _finish(workdir, output, checks, strict, thresholds)
 
+    source_path = (manifest.get("video") or {}).get("path")
+    inputs = StageInputs(workdir, Path(source_path) if source_path else None)
+    try:
+        stale = inputs.first_stale(manifest, (*RENDER_STAGES, "render"))
+    except (OSError, RuntimeError) as exc:
+        _add(checks, "artifact_inputs", FAIL, str(exc))
+        return _finish(workdir, output, checks, strict, thresholds)
+    if stale:
+        _add(checks, "artifact_inputs", FAIL, inputs.stale_message(stale), stage=stale)
+        return _finish(workdir, output, checks, strict, thresholds)
+
     try:
         video_stream, audio_stream, out_duration = _stream_info(output)
     except Exception as exc:  # noqa: BLE001
@@ -1147,6 +1160,11 @@ def attach_to_manifest(workdir: Path, report: QAReport) -> None:
     if not path.exists():
         return
     data = read_json(path, {}) or {}
+    snapshot = data.get("settings_snapshot")
+    if isinstance(snapshot, dict) and "ollama_url" in snapshot:
+        endpoint = public_ollama_url(snapshot.pop("ollama_url"))
+        if endpoint is not None:
+            snapshot["ollama_url"] = endpoint
     summary = report.summary
     data["qa"] = summary
     kept = [

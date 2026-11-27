@@ -3,6 +3,7 @@ import itertools
 import json
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import patch
 
@@ -422,7 +423,7 @@ class UnitTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp, patch(
             "reachreel.engines.tts.make_engine", return_value=SelectiveEngine()
-        ), patch("reachreel.engines.tts._wav_duration", return_value=1.0):
+        ):
             flags = synthesize_segments(
                 segments,
                 Path(tmp),
@@ -488,38 +489,32 @@ class UnitTests(unittest.TestCase):
             self.assertEqual(len(video_key(first)), 20)
 
     def test_vlm_shared_cache_reuse(self):
-        scenes = [Scene(id=1, start=0.0, end=2.0)]
         scene_settings = {
+            "base_url": "http://127.0.0.1:1",
             "content_language": "zh",
             "model": "qwen3-vl:8b-instruct",
             "max_width": 768,
             "frame_dedup": 0.0,
             "context": "",
         }
-        settings_key = vlm_settings_key(**scene_settings)
         with tempfile.TemporaryDirectory() as tmp:
-            shared = Path(tmp) / "shared.json"
-            local = Path(tmp) / "vlm_cache.json"
-            shared.write_text(
-                json.dumps(
-                    {
-                        "settings": settings_key,
-                        "scenes": {"1:0.000:2.000": {"summary": "cached summary"}},
-                    }
-                ),
-                encoding="utf-8",
-            )
-            flags = analyze_scenes(
-                scenes,
-                base_url="http://127.0.0.1:1",
-                model=scene_settings["model"],
-                cache_path=local,
-                shared_cache_path=shared,
-                max_width=scene_settings["max_width"],
-                context=scene_settings["context"],
-                content_language=scene_settings["content_language"],
-                frame_dedup=scene_settings["frame_dedup"],
-            )
+            root = Path(tmp)
+            frame = root / "frame.jpg"
+            frame.write_bytes(b"frame")
+            source = Scene(id=1, start=0.0, end=2.0, frames=[str(frame)])
+            scenes = [Scene(id=1, start=0.0, end=2.0, frames=[str(frame)])]
+            with patch(
+                "reachreel.engines.vlm.analyze_scene",
+                return_value={"summary": "cached summary"},
+            ) as analyze:
+                analyze_scenes([source], shared_cache_path=root / "shared.json", **scene_settings)
+                flags = analyze_scenes(
+                    scenes,
+                    cache_path=root / "vlm_cache.json",
+                    shared_cache_path=root / "shared.json",
+                    **scene_settings,
+                )
+                analyze.assert_called_once()
         self.assertEqual(scenes[0].summary, "cached summary")
         self.assertEqual(flags, [])
 
@@ -556,10 +551,12 @@ class UnitTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             shared_dir = Path(tmp) / "shared"
             shared_dir.mkdir()
-            (shared_dir / f"{key}.wav").write_bytes(b"0" * 2048)
+            with wave.open(str(shared_dir / f"{key}.wav"), "wb") as pcm:
+                pcm.setparams((1, 2, 48000, 0, "NONE", "not compressed"))
+                pcm.writeframes(b"\x00\x00" * 72000)
             with patch(
                 "reachreel.engines.tts.make_engine", return_value=NeverEngine()
-            ), patch("reachreel.engines.tts._wav_duration", return_value=1.5):
+            ):
                 flags = synthesize_segments(
                     [segment],
                     Path(tmp) / "tts",
@@ -1060,7 +1057,7 @@ class UnitTests(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as tmp, patch(
             "reachreel.engines.tts.make_engine", return_value=OverrideEngine()
-        ), patch("reachreel.engines.tts._wav_duration", return_value=1.2):
+        ):
             flags = synthesize_segments(
                 segments,
                 Path(tmp),

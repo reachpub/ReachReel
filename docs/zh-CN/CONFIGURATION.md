@@ -13,16 +13,21 @@ cp config.example.toml config.toml
 reachreel run video.mp4 --config config.toml
 ```
 
-不指定 `--config` 时使用内置默认值；不会自动读取项目里的 `config.toml`，需要显式传入。
+通过 `--config` 显式加载 `config.toml`。省略时，新任务使用内置默认值，已有任务还会沿用工作目录中保存的设置。
+
+<a name="precedence"></a>
 
 ### 优先级
 
 从低到高：
 
-1. 代码内置默认值；
-2. `config.toml`；
-3. 环境变量（`REACHREEL_*`）；
-4. 命令行参数。
+1. 内置默认值。
+2. 工作目录中保存的设置（如有）。
+3. `--config` 指定文件中显式设置的字段。
+4. 环境变量（`REACHREEL_*`）。
+5. 命令行参数。
+
+工作目录快照会保存 Ollama 的主机、端口及代理路径。如需 URL 中的用户信息、查询参数或片段，运行时须通过显式配置重新提供。
 
 ### 路径解析
 
@@ -223,7 +228,7 @@ subtitle_outline = 0.0        # 0 表示自动，约为 subtitle_size 的 6%（o
 subtitle_box_padding = 0.0    # 0 表示自动，1920 高时约 6.7 px（box 模式）
 ```
 
-`subtitle_render = "box"` 恢复旧的半透明黑底色块，内边距随输出高度缩放（1920 高时约 6.7 px），可用 `subtitle_box_padding` 固定。`subtitle_render = "none"` 是纯白字：只有字幕所在区域整体偏暗时才建议使用。已有工作目录会沿用 `manifest.json` → `render_settings` 里记录的值；想复现旧观感时在 `render` 上传 `--subtitle-render box`：
+`subtitle_render = "box"` 恢复旧的半透明黑底色块，内边距随输出高度缩放（1920 高时约 6.7 px），可用 `subtitle_box_padding` 固定。`subtitle_render = "none"` 是纯白字：只有字幕所在区域整体偏暗时才建议使用。已有工作目录会沿用保存的设置。想复现旧观感时，在 `render` 上传 `--subtitle-render box`：
 
 竖屏建议：
 
@@ -298,7 +303,7 @@ ambient_duck_db = -8.0
 | `cache_enabled` | `true` | 跨工作目录复用 VLM 分析结果和 TTS 音频 |
 | `cache_dir` | `""` | 共享缓存根目录；空表示平台缓存目录（macOS 为 `~/Library/Caches/reachreel`，旧 `~/.cache/reachreel` 存在时优先复用） |
 
-共享缓存按“视频采样指纹”存 VLM 结果，按“文本/模型/音色”存 TTS 音频。可用 `cache_enabled = false`、`REACHREEL_CACHE=0` 或全局 `--no-cache` 关闭。管理命令：
+视频、关键帧和分析设置一致时，共享缓存可复用成功的 VLM 结果。文本和合成设置一致时可复用完整的 TTS WAV，损坏或截断的 WAV 会被跳过。用 `cache_enabled = false`、`REACHREEL_CACHE=0` 或全局 `--no-cache` 可关闭共享缓存。
 
 ```bash
 reachreel cache info
@@ -322,6 +327,8 @@ subtitle_margin_v = 220
 ```
 
 ---
+
+<a name="10-qa-thresholds"></a>
 
 ## 10. QA 阈值
 

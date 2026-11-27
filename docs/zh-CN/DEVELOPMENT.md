@@ -92,7 +92,9 @@ qa
 | `src/reachreel/media/subtitles.py` | Whisper 转写、语音窗口、SRT、ASS 布局 | `cues_from_timeline`, `build_subtitles`, `write_ass` |
 | `src/reachreel/media/audio.py` | BGM 选择/循环、曲目元数据、授权导出、侧链闪避、响度 | `pick_bgm`, `mix_audio`, `bgm_metadata`, `bgm_license_markdown` |
 | `src/reachreel/media/render.py` | 缩放/帧率、硬字幕/软字幕、封装 | `render`, `subtitle_style` |
+| `src/reachreel/media/edit_export.py` | 干净画面编码与剪辑时间线 XML 序列化 | `write_edit_bundle` |
 | `src/reachreel/pipeline/orchestrator.py` | 阶段编排、缓存、manifest、doctor | `Pipeline`, `doctor`, `doctor_report` |
+| `src/reachreel/pipeline/stage_inputs.py` | 流水线与独立 QA 共用的输入校验 | `StageInputs` |
 | `src/reachreel/pipeline/qa.py` | 成片质量闸门 | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits 校验器，pre-commit hook 与 CI 共用 | `validate`, `messages_in_range` |
 | `scripts/apdev_charset.json` | `apdev check-chars` 的字符集：ASCII + emoji + CJK 标点，汉字仍然非法 | — |
@@ -144,15 +146,16 @@ qa
 - `width` / `height` 是**显示分辨率**：如果视频带 90°/270° 旋转元数据，会交换宽高。
 - `coded_width` / `coded_height` 是旋转前的编码尺寸；`0` 表示早于这两个字段的旧工作目录。
 - `frames` 是绝对路径。
+- `inputs_key` 记录原片以及镜头检测、抽帧所用的配置。执行 VLM 阶段时可以刷新缺少此键的旧 `scenes.json`。
 - VLM 字段可能为空；脚本阶段有兜底。
 
 ### 4.2 `vlm_cache.json`
 
 ```json
 {
-  "settings": "zh|qwen3-vl:8b-instruct|vf-vlm-2|768|已知背景...",
+  "settings": "<settings-hash>",
   "scenes": {
-    "1:0.000:7.740": {
+    "<scene-hash>": {
       "summary": "...",
       "place": "...",
       "subjects": [],
@@ -166,9 +169,10 @@ qa
 }
 ```
 
-- 缓存 key 包含成片语言、模型、prompt 版本、抽帧宽度、`brief`。
-- 修改这些设置会让缓存失效。
-- `--force` 会删除缓存文件。
+- `settings` 记录 VLM 端点、成片语言、模型、提示词及其版本、抽帧宽度、去重阈值和 `brief` 的指纹。
+- 每个镜头的键包含镜头 ID、起止时间和按序排列的帧内容指纹。相同输入可跨工作目录复用结果。
+- 缓存保存成功的分析结果。后续运行可重试失败或降级的镜头，包括缺少关键帧或无法解析模型响应的情况。旧缓存键会在使用时重建。
+- `--force` 跳过工作目录和共享缓存的读取。强制重跑得到的成功结果可重新写入缓存。
 
 ### 4.3 `script.json`
 
@@ -193,6 +197,7 @@ qa
 - `text` 是人工可编辑字段；
 - `audio_path` / `duration` / `start` / `end` / `tts_speed` 由后续阶段回填；
 - `scene_ids` 决定旁白锚定到哪个场景。
+- 自动生成的稿件还记录 `generation.inputs_key`（写稿输入）和 `generation.segments_key`（生成的段落）。正常续跑用这些哈希值判断是否需要更新生成稿，同时保留人工编辑过的稿件。旧版本的稿件在成片语言一致时仍可复用。
 
 ### 4.4 `timeline.json`
 
@@ -220,6 +225,7 @@ qa
 
 ```json
 {
+  "schema_version": 2,
   "video": { "...": "同 scenes.json" },
   "workdir": "...",
   "output": "...",
@@ -290,7 +296,9 @@ qa
 }
 ```
 
-`render_settings` 让 `reachreel render` 能复现上次的输出尺寸、字幕样式和 CRF。
+`settings_snapshot` 保存当前任务设置，供下次命令使用。从清单版本 2 起，`render_settings` 记录最近一次成功渲染的设置，供 QA 使用，仅在渲染成功时更新。旧版清单保存的设置仍可用于续跑。
+
+`artifact_inputs` 记录阶段输入指纹，成功渲染时也会记录已发布的成片和硬字幕侧文件。媒体身份使用采样指纹和修改时间。TTS 的镜头指纹只涵盖切点与时长，修改画面描述本身不会使旁白时间轴失效。独立 QA 和流水线通过 `StageInputs` 共用检查逻辑。旧工作目录在对应阶段重跑前会利用已有指纹与修改时间判断。
 
 `quality_flags` 记录没有中断流程的降级情况。当前 code：
 
@@ -321,6 +329,7 @@ qa
 | `qa.json` | QA 闸门结果 |
 | `licenses.md` | `reachreel licenses` 导出的 BGM 授权清单 |
 | `final.mp4` | 成片 |
+| `edit/` | 可选剪辑素材包，`edit/manifest.json` 记录包内相对文件名 |
 
 ### 4.7 共享缓存（可选）
 
@@ -509,14 +518,17 @@ factor = clamp(factor, 1.0, max_speedup)
 
 | 方法 | 命令 | 输入 | 输出 |
 |---|---|---|---|
-| `stage_script` | `reachreel script` | `scenes.json` + VLM 缓存 | `script.json` |
-| `stage_tts` | `reachreel tts` | `script.json` | `tts/` + `timeline.json` + `narration.wav` |
+| `stage_analyze` | `reachreel analyze` | 原片 | `scenes.json` + `manifest.json` |
+| `stage_script` | `reachreel script` | `scenes.json` | `script.json` + `script.md` |
+| `stage_tts` | `reachreel tts` | `script.json` + `scenes.json` | `tts/` + `timeline.json` + `narration.wav` |
 | `stage_subtitle` | `reachreel subtitle` | `timeline.json` + `narration.wav` | `subtitles.srt` + `subtitles.ass` |
-| `stage_mix` | `reachreel mix` | `narration.wav` + BGM | `mix.wav` |
+| `stage_mix` | `reachreel mix` | `timeline.json` + `narration.wav` + 可选 BGM | `mix.wav` |
 | `render_final` | `reachreel render` | `mix.wav` + SRT/ASS | `final.mp4` |
 | `run_qa` | `reachreel qa` | `final.mp4` + 中间文件 | `qa.json` |
 
-阶段命令从 `manifest.json` 的 `settings_snapshot` / `render_settings` 恢复参数，命令行参数优先。
+`analyze` 和 `run --only vlm,script` 会保存 `manifest.json`，供后续命令加载工作目录。工作目录清单提供已保存的设置，随后依次应用显式配置字段、环境变量和命令行参数。两种渲染命令都通过 `Pipeline`，由同一处更新渲染设置和 QA 状态。
+
+`Pipeline.export_edit` 读取原片、已有旁白和字幕，以及可选的混音。发布渲染生成单个合成视频，剪辑所用的编码和两种 XML 序列化由剪辑导出模块处理。每次导出先在同级临时目录生成素材，再通过重命名发布完整素材包。任务清单的 `files.edit_export` 声明默认导出位置，素材包清单记录相对于包根目录的文件名。XML 引用导出位置下的素材，可在该位置直接导入。
 
 ### 5.11 QA 闸门
 
@@ -541,13 +553,13 @@ factor = clamp(factor, 1.0, max_speedup)
 
 | 缓存 | 位置 | 失效条件 |
 |---|---|---|
-| 场景/抽帧 | `scenes.json` + `frames/` | `--force`、视频路径变化、`--no-resume` |
-| VLM | `vlm_cache.json` | `--force`、模型/prompt/宽度/`brief` 变化 |
-| 解说 | `script.json` | `--force`、`--no-resume`、手动删除 |
-| TTS | `tts/seg_*_<hash>.wav` | 文本/音色/模型/语速变化、`--force` |
+| 场景/抽帧 | `scenes.json` + `frames/` | 原片、镜头检测或抽帧设置变动，关键帧缺失，`--force`，`--no-resume` |
+| VLM | `vlm_cache.json` | VLM 设置、镜头起止时间或帧内容变动，`--force` |
+| 解说 | `script.json` | 带生成记录且未编辑的稿件遇到写稿输入变动，显式重写文案，`--force`，`--no-resume` |
+| TTS | `tts/seg_*_<hash>.wav` | 文本或生效的音色、合成设置变动，`--force` |
 | 渲染 | `final.mp4` | 每次 `run` 都会重新渲染 |
 
-`Pipeline` 在复用 `scenes.json` 时会检查视频路径是否一致；不一致会重新分析。
+VLM 阶段在前置条件变化后重新检测镜头并抽帧。直接运行后续阶段时会读取已有输入，缺少文件则提示补跑前置阶段的命令。
 
 ---
 
@@ -647,23 +659,22 @@ _add(
 
 ```bash
 cd /path/to/reachreel
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -e .
+uv sync --python 3.12
 source .venv/bin/activate
 
 reachreel doctor
-uvx ruff check src/reachreel tests scripts
-python -m unittest discover -s tests -v
-
-pre-commit install                    # 安装 pre-commit 与 commit-msg 两个 hook
+uv run ruff check src/reachreel tests scripts
+.venv/bin/python -m unittest discover -s tests -v
 ```
+
+`uv sync` 通过默认的 `dev` 依赖组安装 pytest 和 Ruff。上面的测试命令与 CI 一致。
 
 开发环境必须是 Apple Silicon 上的 macOS。`reachreel doctor` 在 Intel macOS、Linux、Windows 上会让 `平台` 这项失败，因为 MLX 没有 x86_64 macOS 构建。
 
 ### 维护工具（`.[dev]`）
 
 ```bash
-uv pip install --python .venv/bin/python -e '.[dev]'
+uv sync --extra dev
 apdev check-imports                                      # 依赖方向保持无环
 apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel -name '*.py')
 ```
@@ -677,13 +688,13 @@ apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel
 
 `[tool.apdev]` 同时供 `apdev release` 使用：它会校验 `pyproject.toml` 与 `reachreel.__version__` 一致，用 `python -m build` 打包、跑 `twine check`，然后逐步提供打 tag / 建 GitHub release / 上传 PyPI。先收口版本，再交给它：
 
-1. 把 `[Unreleased]` 的内容搬进两份变更记录里新的 `## [x.y.z] - YYYY-MM-DD` 段；
-2. 更新 `pyproject.toml` 的 `version` 与 `src/reachreel/__init__.py` 的 `__version__`；
-3. `apdev release`（非交互时加 `--yes`）。
+1. 将两份变更记录的发布标题设为 `## [x.y.z] - YYYY-MM-DD`。如果已有待发布版本段，补上发布日期并移除待发布说明。
+2. 在 `pyproject.toml` 中设置 `version`，然后重新安装可编辑包，使 `reachreel.__version__` 读取新的安装元数据。
+3. 执行 `apdev release`（非交互时加 `--yes`）。
 
 tag 采用 `v` 前缀（`v0.3.0`）。
 
-**节奏**：值得对外宣布时才发版，不要每个提交都发。上限是一天一次，并且要带一次有意义的迭代——新能力、用户可见的行为变化，或一批值得单独给版本号的修复。文档、CI、工具类改动先积攒在 `[Unreleased]`，等下一次真正的发布。
+**节奏**：值得对外宣布时才发版，不要每个提交都发。上限是一天一次，并且要带一次有意义的迭代——新能力、用户可见的行为变化，或一批值得单独给版本号的修复。文档、CI 和工具类改动先积攒在待发布段，随下一版本发布。
 
 ### 发布到 PyPI
 
@@ -763,7 +774,7 @@ refactor(core)!: drop python 3.10
 | `commit-message`（commit-msg 阶段） | `scripts/check_commit_messages.py` |
 
 ```bash
-uv pip install --python .venv/bin/python -e '.[dev]'
+uv sync --extra dev
 pre-commit install          # 通过 default_install_hook_types 安装两个阶段
 ```
 
@@ -791,7 +802,7 @@ pre-commit install          # 通过 default_install_hook_types 安装两个阶�
 | `checks` | `ubuntu-latest` | 提交信息、变更记录一致性、`apdev check-chars`（Python 源码）、`apdev check-imports`、配置项一致性 |
 | `test` | `macos-15` × Python 3.11/3.12 | Ruff、单元测试、`uv build`（仅 3.12） |
 
-`checks` 不需要虚拟环境，几秒结束；提交信息写错会在 macOS runner 分配之前就失败。`tests/integration` 不进 CI，本地用 `REACHREEL_INTEGRATION=1` 跑。
+`checks` 不需要虚拟环境，可以提前发现提交信息格式错误。macOS 的 Python 3.12 任务会运行无需模型的媒体测试。设置 `REACHREEL_INTEGRATION=1` 可在本地运行完整的集成测试。
 
 ### 合成测试素材
 
@@ -833,12 +844,12 @@ reachreel run /tmp/vf_test.mp4 \
 - `tests/integration/test_scenes.py`：可选的、只依赖 FFmpeg 的 fixture——三色片段在 2s / 4s 有已知切点，用于断言 `detect_scenes`（切点边界、`min_len` 合并、`max_len` 切分）；另有无音轨 / 单声道 / 5.1 片段断言 `probe_video` 的声道数，以及 90° / 180° / 270° 片段断言编码尺寸与显示尺寸。
 - `tests/integration/test_timeline.py`：可选的旁白加速 fixture——生成的 WAV 总长超过片长，`place_segments` 必须调用 `atempo`、改写 `audio_path` 并缩短时长；不需要加速时必须原样保留文件。
 - `tests/integration/test_smoke.py::OnlyReuseTest`：可选的 `run --only` 复用 smoke，对比 `scenes.json` / `narration.wav` / `subtitles.srt` 的哈希，证明前面的阶段没有被重跑。
-- CI：`.github/workflows/ci.yml` 在 `macos-15`（Apple Silicon）上对 Python 3.11 和 3.12 跑 Ruff、单元测试和 `uv build`。标签是刻意固定的：GitHub 会定期下线 macOS 镜像，被下线的标签会让所有任务在排队阶段就失败，报的是 `<配置> is not supported`，而不是测试失败。只使用当前仍支持的 arm64 标签，不支持 Intel macOS。集成测试不进 CI，本地用 `REACHREEL_INTEGRATION=1` 跑。
+- CI 在 `macos-15` 上用 Python 3.11 和 3.12 运行 Ruff 和单元测试。Python 3.12 任务还会构建软件包，并运行无需模型的续跑、镜头、时间轴和剪辑导出集成测试。本地设置 `REACHREEL_INTEGRATION=1` 可运行完整集成测试，包括 macOS `say` 冒烟测试。
 - 目前没有 golden output。
 
 建议补充：
 
-1. 覆盖全部阶段组合的 `run --only` 复用 smoke；
+1. 补充 `--only` 续跑的上下游阶段组合；
 2. 用真实素材调 QA 阈值（现有 fixture 都是合成的）；
 3. 旋转竖屏片的端到端阶段 smoke。
 
@@ -877,8 +888,8 @@ reachreel run /tmp/vf_test.mp4 \
 
 ## 12. 发布检查清单
 
-- [ ] `uvx ruff check src/reachreel tests` 通过；
-- [ ] `python -m unittest discover -s tests` 通过；
+- [ ] `uv run ruff check src/reachreel tests scripts` 通过；
+- [ ] `.venv/bin/python -m unittest discover -s tests -v` 通过；
 - [ ] `reachreel doctor` 通过；
 - [ ] 用一条横屏 + 一条竖屏素材各跑一遍；
 - [ ] 检查硬字幕、软字幕、无 BGM、无音轨；

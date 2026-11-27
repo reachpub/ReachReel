@@ -4,12 +4,16 @@ on:
   push:
     branches: [main]
     paths:
+      - "README.md"
+      - "README.zh-CN.md"
       - "docs/**"
       - "mkdocs.yml"
       - "scripts/mkdocs_hooks.py"
       - ".github/workflows/docs.yml"
   pull_request:
     paths:
+      - "README.md"
+      - "README.zh-CN.md"
       - "docs/**"
       - "mkdocs.yml"
       - "scripts/mkdocs_hooks.py"

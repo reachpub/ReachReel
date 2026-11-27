@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "reachreel"
-version = "0.4.0"
+version = "0.5.0"
 description = "Fully local video narration pipeline: Ollama VLM -> script -> Kokoro TTS -> Whisper subtitles -> BGM ducking -> FFmpeg"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -71,6 +71,9 @@ docs = [
   "mkdocs-material>=9.5",
   "mkdocs-static-i18n>=1.2",
 ]
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
 
 [project.scripts]
 reachreel = "reachreel.cli.main:main"

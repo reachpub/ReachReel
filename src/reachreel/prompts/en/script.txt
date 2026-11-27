@@ -6,7 +6,7 @@ Scene analysis:
 
 Write a narration script that can be voiced directly. Requirements:
 1. Follow chronological order and cover the main scenes, but do not list every shot.
-2. Only state what the footage supports. Do not invent places, people, brands, or events.
+2. Only state what the footage or explicit facts in the brief support. List the scene IDs that support each segment. Do not invent places, people, brands, or events.
 3. Keep the total narration around {target_chars} characters (about {cps:.1f} characters per second; video length {duration:.1f} seconds).
 4. Write at least {min_segments} segments, spread evenly over the timeline; the last segment should land 5-12 seconds before the video ends. Do not push all narration into the first half.
 5. Use 1-3 sentences per segment and leave breathing room between segments. Enter the scene within the first 3 seconds; do not open with "Hello everyone" or "Welcome back".

@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import json
+import shlex
 import shutil
 import time
+from contextlib import suppress
 from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from ..core.cache import cache_root, tts_cache_dir, video_key, vlm_cache_path
-from ..core.config import Settings, settings_to_dict
+from ..core.config import Settings, public_ollama_url, settings_to_dict
 from ..core.util import (
     LOG,
     atomic_write_json,
@@ -18,10 +20,12 @@ from ..core.util import (
     host_platform,
     platform_supported,
     read_json,
+    sha1_text,
 )
 from ..domain.models import (
     NarrationSegment,
     QualityFlag,
+    Scene,
     VideoInfo,
     merge_quality_flags,
 )
@@ -40,8 +44,17 @@ from ..media.scenes import (
     save_scenes,
 )
 from ..media.subtitles import build_subtitles, write_ass
+from ..prompts import load_content, load_prompt
+from .stage_inputs import NARRATION_STAGES, RENDER_STAGES, STAGE_ARTIFACTS, StageInputs
 
 STAGE_ORDER = ["probe", "vlm", "script", "tts", "subtitles", "mix", "render", "qa"]
+EDIT_FORMATS = ("mp4", "mov")
+MANIFEST_SCHEMA_VERSION = 2
+
+_ANALYSIS_OPTIONS = (
+    "vlm_model", "content_language", "brief", "scene_threshold", "min_scene_seconds",
+    "max_scene_seconds", "max_scenes", "vlm_frames_per_scene", "vlm_max_width", "vlm_frame_dedup",
+)
 
 # User-facing names accepted by `run --only`. `tts` includes the timeline stage;
 # `analyze` is kept as an alias of the VLM stage.
@@ -63,18 +76,6 @@ STAGE_ALIASES = {
 def stage_label(stage: str) -> str:
     """Localized stage label for dry-run output and progress logs."""
     return t(f"stage.{stage}")
-
-STAGE_ARTIFACTS = {
-    "probe": "scenes.json",
-    "vlm": "vlm_cache.json",
-    "script": "script.json",
-    "tts": "timeline.json + narration.wav",
-    "subtitles": "subtitles.srt",
-    "mix": "mix.wav",
-    "render": "final.mp4",
-    "qa": "qa.json",
-}
-
 
 def review_stages(stages: list[str]) -> list[str]:
     """Truncate a stage list at ``script`` for the human review gate."""
@@ -140,10 +141,13 @@ class Pipeline:
         self.bgm_path = self.workdir / "bgm_loop.wav"
         self.mix_path = self.workdir / "mix.wav"
         self.output_path = self.workdir / "final.mp4"
+        self.edit_export_path = self.workdir / "edit"
         self.manifest_path = self.workdir / "manifest.json"
         self._info: VideoInfo | None = None
-        self._scenes = None
+        self._scenes: list[Scene] | None = None
+        self._scene_inputs_key: str | None = None
         self._segments: list[NarrationSegment] | None = None
+        self.stage_inputs = StageInputs(self.workdir, self.video)
         self.bgm_source: Path | None = None
         self.bgm_metadata: dict[str, Any] | None = None
         self.bgm_disabled = False
@@ -176,20 +180,29 @@ class Pipeline:
 
     def prepare_scenes(self) -> None:
         info = self.load_video()
+        settings = self.settings
+        self._scene_inputs_key = _data_key((
+            self.video_cache_key(), self.video.stat().st_mtime_ns, info.duration,
+            settings.scene_threshold, settings.min_scene_seconds, settings.max_scene_seconds,
+            settings.max_scenes, settings.vlm_frames_per_scene, settings.vlm_max_width,
+            settings.vlm_frame_dedup,
+        ))
         if self.scenes_path.exists() and self.resume and not self.force:
-            cached_info, cached_scenes = load_scenes(self.scenes_path)
-            if Path(cached_info.path).resolve() != self.video:
-                LOG.warning("Scene analysis in the workdir belongs to a different video; re-analyzing")
-            else:
-                # Always trust a fresh probe: scenes.json written by an older
-                # version may lack rotation/coded dimensions.
-                if cached_info != info:
-                    LOG.info("Refreshing video metadata in scenes.json")
-                    save_scenes(self.scenes_path, info, cached_scenes)
-                self._info = info
-                self._scenes = cached_scenes
-                LOG.info("Reusing scene analysis (%d scenes)", len(self._scenes))
-                return
+            cached = read_json(self.scenes_path, {}) or {}
+            if isinstance(cached, dict) and cached.get("inputs_key") == self._scene_inputs_key:
+                with suppress(OSError, ValueError, KeyError, TypeError):
+                    cached_info, cached_scenes = load_scenes(self.scenes_path)
+                    if Path(cached_info.path).resolve() == self.video and cached_scenes and all(
+                        scene.frames and all(Path(frame).is_file() for frame in scene.frames)
+                        for scene in cached_scenes
+                    ):
+                        if cached_info != info:
+                            save_scenes(
+                                self.scenes_path, info, cached_scenes, inputs_key=self._scene_inputs_key
+                            )
+                        self._scenes = cached_scenes
+                        LOG.info("Reusing scene analysis (%d scenes)", len(cached_scenes))
+                        return
         LOG.info("Detecting scenes...")
         scenes = detect_scenes(
             self.video,
@@ -209,7 +222,7 @@ class Pipeline:
             width=self.settings.vlm_max_width,
             dedup=self.settings.vlm_frame_dedup,
         )
-        save_scenes(self.scenes_path, info, scenes)
+        save_scenes(self.scenes_path, info, scenes, inputs_key=self._scene_inputs_key)
         self._scenes = scenes
 
     def video_cache_key(self) -> str:
@@ -244,46 +257,66 @@ class Pipeline:
             )
         )
         info = self.load_video()
-        save_scenes(self.scenes_path, info, self._scenes)
+        save_scenes(self.scenes_path, info, self._scenes, inputs_key=self._scene_inputs_key)
 
     def write_script(self, *, reuse: bool = True) -> None:
         assert self._scenes is not None
+        settings = self.settings
+        language = settings.content_language
+        options = {
+            "duration": self.load_video().duration,
+            "style": settings.style,
+            "style_preset": settings.resolved_style_preset(),
+            "style_guidance": settings.resolved_style_guidance(),
+            "oral_polish": settings.script_oral_polish,
+            "brief": settings.brief,
+            "cps": settings.resolved_speech_chars_per_second(),
+            "density": settings.narration_density,
+            "temperature": settings.llm_temperature,
+            "content_language": language,
+        }
+        inputs_key = _data_key((
+            options, settings.ollama_url, settings.llm_model,
+            load_prompt(language, "script"), load_content(language),
+            [{key: value for key, value in scene.to_dict().items() if key != "frames"}
+             for scene in self._scenes],
+        ))
         if reuse and self.script_path.exists() and self.resume and not self.force:
             data = read_json(self.script_path, {})
+            if not isinstance(data, dict):
+                data = {}
             segments = _load_segments(data)
             cached_language = data.get("content_language", "zh")
-            if segments and cached_language == self.settings.content_language:
+            generation = data.get("generation")
+            if not isinstance(generation, dict):
+                generation = {}
+            edited = bool(generation) and generation.get("segments_key") != _data_key(
+                [segment.to_dict() for segment in segments]
+            )
+            if segments and edited and cached_language != language:
+                raise self._script_language_mismatch(cached_language)
+            if segments and cached_language == language and (
+                edited or not generation or generation.get("inputs_key") == inputs_key
+            ):
                 self._segments = segments
-                LOG.info("Reusing narration script (%d segments)", len(segments))
+                LOG.info(
+                    "Reusing %s narration script (%d segments)",
+                    "edited" if edited else "existing", len(segments),
+                )
                 return
             if segments:
-                LOG.info(
-                    "Narration language changed (%s -> %s); regenerating script",
-                    cached_language,
-                    self.settings.content_language,
-                )
-        client = OllamaClient(self.settings.ollama_url, self.settings.llm_model)
-        segments = generate_script(
-            self._scenes,
-            duration=self.load_video().duration,
-            client=client,
-            style=self.settings.style,
-            style_preset=self.settings.resolved_style_preset(),
-            style_guidance=self.settings.resolved_style_guidance(),
-            oral_polish=self.settings.script_oral_polish,
-            brief=self.settings.brief,
-            cps=self.settings.resolved_speech_chars_per_second(),
-            density=self.settings.narration_density,
-            temperature=self.settings.llm_temperature,
-            content_language=self.settings.content_language,
-        )
+                LOG.info("Narration inputs changed; regenerating script")
+        client = OllamaClient(settings.ollama_url, settings.llm_model)
+        segments = generate_script(self._scenes, client=client, **options)
+        serialized = [segment.to_dict() for segment in segments]
         atomic_write_json(
             self.script_path,
             {
-                "content_language": self.settings.content_language,
-                "style_preset": self.settings.resolved_style_preset(),
-                "style": self.settings.resolved_style(),
-                "segments": [s.to_dict() for s in segments],
+                "content_language": language,
+                "style_preset": settings.resolved_style_preset(),
+                "style": settings.resolved_style(),
+                "segments": serialized,
+                "generation": {"inputs_key": inputs_key, "segments_key": _data_key(serialized)},
             },
         )
         self._segments = segments
@@ -315,12 +348,12 @@ class Pipeline:
             self.load_video().duration,
             self.settings,
         )
-        save_timeline(self.timeline_path, self._segments)
         build_narration_track(
             self._segments,
             self.load_video().duration,
             self.narration_path,
         )
+        save_timeline(self.timeline_path, self._segments)
 
     def make_subtitles(self, *, asr_engine: str = "mlx-whisper") -> None:
         assert self._segments is not None
@@ -346,23 +379,26 @@ class Pipeline:
     def make_mix(self, *, bgm_file: Path | None, no_bgm: bool) -> None:
         info = self.load_video()
         bgm_wav = None
+        directory = self.settings.resolved_bgm_dir()
+        saved = self.bgm_source
+        if saved is not None and (
+            not saved.is_file() or saved.absolute().parent.resolve() != directory.resolve()
+        ):
+            saved = None
+        chosen = None
         if not no_bgm:
-            chosen = bgm_file or self.bgm_source or pick_bgm(self.settings)
-            if chosen:
-                self.bgm_disabled = False
-                self.bgm_source = chosen
-                self.bgm_metadata = bgm_metadata(chosen)
-                if chosen.resolve() == self.bgm_path.resolve() and self.bgm_path.exists():
-                    # Stage commands may hand us the already-looping bed.
-                    bgm_wav = self.bgm_path
-                else:
-                    prepare_bgm_loop(chosen, info.duration, self.bgm_path)
-                    bgm_wav = self.bgm_path
-            else:
-                LOG.warning("No BGM found. Put CC0 music in %s to enable automatic mixing.", self.settings.resolved_bgm_dir())
-        else:
-            self.bgm_disabled = True
-            self.bgm_source = None
+            chosen = bgm_file or (
+                pick_bgm(self.settings) if self.settings.bgm_file else saved or pick_bgm(self.settings)
+            )
+        self.bgm_disabled = chosen is None
+        self.bgm_source = chosen
+        self.bgm_metadata = bgm_metadata(chosen) if chosen else None
+        if chosen:
+            if chosen.resolve() != self.bgm_path.resolve():
+                prepare_bgm_loop(chosen, info.duration, self.bgm_path)
+            bgm_wav = self.bgm_path
+        elif not no_bgm:
+            LOG.warning("No BGM found. Put CC0 music in %s to enable automatic mixing.", directory)
         mix_audio(
             video=self.video,
             narration_wav=self.narration_path,
@@ -374,7 +410,8 @@ class Pipeline:
         )
 
     def render_final(self, *, burn: bool) -> bool:
-        burned = render(
+        self._require_render_inputs()
+        self.burned_subtitles = render(
             video=self.video,
             audio=self.mix_path,
             subtitles=self.subtitles_path,
@@ -382,20 +419,70 @@ class Pipeline:
             settings=self.settings,
             burn=burn,
         )
-        return burned
+        return self.burned_subtitles
+
+    def export_edit(self, *, destination: Path | None = None, video_format: str = "mp4") -> Path:
+        """Build an editing bundle using the source and existing stage artifacts."""
+        from ..media.edit_export import write_edit_bundle
+
+        if video_format not in EDIT_FORMATS:
+            raise ValueError(f"Unsupported edit video format: {video_format}")
+        for path, command in (
+            (self.narration_path, "tts"),
+            (self.subtitles_path, "subtitle"),
+            (self.mix_path, None),
+        ):
+            if not path.resolve().is_relative_to(self.workdir):
+                raise ValueError(t("error.export_artifact_escape", name=path.name))
+            if command and not path.is_file():
+                raise ValueError(t("error.export_missing", name=path.name, command=command))
+        stages = RENDER_STAGES if self.mix_path.is_file() else (*NARRATION_STAGES, "subtitles")
+        self._require_current(stages)
+        destination = destination.expanduser() if destination is not None else self.edit_export_path
+        destination = destination.parent.resolve() / destination.name
+        write_edit_bundle(
+            destination,
+            source=self.load_video(),
+            narration=self.narration_path,
+            subtitles=self.subtitles_path,
+            mix=self.mix_path if self.mix_path.is_file() else None,
+            settings=self.settings,
+            video_format=video_format,
+        )
+        return destination
 
     # ---------- stage commands ----------
 
+    def _missing_input(self, path: Path, *next_args: str) -> RuntimeError:
+        return RuntimeError(t(
+            "error.missing_stage_input",
+            name=path.name,
+            command=shlex.join(("reachreel", *next_args)),
+        ))
+
+    def _script_language_mismatch(self, original: str) -> RuntimeError:
+        language = self.settings.content_language
+        return RuntimeError(t(
+            "error.saved_script_language",
+            original=original,
+            requested=language,
+            command=shlex.join((
+                "reachreel", "script", str(self.workdir), "--content-language", language,
+            )),
+        ))
+
     def load_scenes_data(self) -> None:
+        self._require_current(("vlm",))
         if self._scenes is not None:
             return
-        if not self.scenes_path.exists():
-            raise RuntimeError(
-                f"Missing {self.scenes_path.name}. Run first: reachreel analyze <video> --workdir {self.workdir}"
-            )
-        info, scenes = load_scenes(self.scenes_path)
-        if Path(info.path).resolve() != self.video:
-            raise RuntimeError("scenes.json does not match the current video")
+        try:
+            info, scenes = load_scenes(self.scenes_path)
+            if not scenes or Path(info.path).resolve() != self.video:
+                raise ValueError("Scene analysis does not match the current video")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise self._missing_input(
+                self.scenes_path, "analyze", str(self.video), "--workdir", str(self.workdir)
+            ) from exc
         self._info = info
         self._scenes = scenes
 
@@ -405,20 +492,17 @@ class Pipeline:
         data = read_json(self.script_path, {})
         segments = _load_segments(data)
         if not segments:
-            raise RuntimeError(
-                f"Missing {self.script_path.name}. Run first: reachreel script {self.workdir}"
-            )
+            raise self._missing_input(self.script_path, "script", str(self.workdir))
+        language = data.get("content_language")
+        if language and language != self.settings.content_language:
+            raise self._script_language_mismatch(language)
         self._segments = segments
 
-    def ensure_narration(self) -> None:
-        if self.narration_path.exists():
-            return
+    def _load_narration_inputs(self) -> None:
+        self._require_current(NARRATION_STAGES)
         self.load_timeline()
-        build_narration_track(
-            self._segments or [],
-            self.load_video().duration,
-            self.narration_path,
-        )
+        if not self.narration_path.is_file():
+            raise self._missing_input(self.narration_path, "tts", str(self.workdir))
 
     def load_timeline(self) -> None:
         data = read_json(self.timeline_path, {})
@@ -426,27 +510,39 @@ class Pipeline:
         if segments and any(segment.audio_path for segment in segments):
             self._segments = segments
             return
-        # No usable timeline: rebuild it from the script + existing TTS audio.
-        self.load_scenes_data()
-        self.load_script()
-        self.make_voice()
-        self.make_timeline()
+        raise self._missing_input(self.timeline_path, "tts", str(self.workdir))
 
-    def stage_script(self) -> None:
+    def stage_analyze(self) -> None:
+        started = time.time()
+        inputs = self.stage_inputs.capture("vlm")
         self.prepare_scenes()
         self.understand()
-        self.write_script(reuse=False)
-        self.write_manifest(started=time.time(), burned=False, announce=False)
-        self.write_script_md()
-        LOG.info("Review: %s", self.script_md_path)
-        LOG.info("Next: reachreel tts %s", self.workdir)
+        self.write_manifest(
+            started=started, burned=None, announce=False, artifact_inputs={"vlm": inputs}
+        )
+
+    def stage_script(self, *, refresh_analysis: bool = False) -> None:
+        if refresh_analysis or self._analysis_settings_changed():
+            self.stage_analyze()
+        self.run(only="script")
+
+    def _analysis_settings_changed(self) -> bool:
+        manifest = read_json(self.manifest_path, {}) or {}
+        recorded = manifest.get("analysis_settings_key")
+        if recorded:
+            return recorded != self._analysis_settings_key()
+        saved = {**(manifest.get("settings") or {}), **(manifest.get("settings_snapshot") or {})}
+        return any(key in saved and saved[key] != getattr(self.settings, key)
+                   for key in _ANALYSIS_OPTIONS)
+
+    def _analysis_settings_key(self) -> str:
+        return _data_key((
+            public_ollama_url(self.settings.ollama_url),
+            [getattr(self.settings, key) for key in _ANALYSIS_OPTIONS],
+        ))
 
     def stage_tts(self) -> None:
-        self.load_script()
-        self.load_scenes_data()
-        self.make_voice()
-        self.make_timeline()
-        self.update_manifest()
+        self.run(only="tts")
         LOG.info(
             "Next: reachreel subtitle %s && reachreel mix %s && reachreel render %s",
             self.workdir,
@@ -455,44 +551,12 @@ class Pipeline:
         )
 
     def stage_subtitle(self, *, asr_engine: str = "mlx-whisper") -> None:
-        self.load_timeline()
-        self.ensure_narration()
-        self.make_subtitles(asr_engine=asr_engine)
-        self.update_manifest()
+        self.run(only="subtitles", asr_engine=asr_engine)
         LOG.info("Next: reachreel render %s", self.workdir)
 
     def stage_mix(self, *, bgm_file: Path | None = None, no_bgm: bool = False) -> None:
-        self.load_timeline()
-        self.ensure_narration()
-        self.make_mix(bgm_file=bgm_file, no_bgm=no_bgm)
-        self.update_manifest()
+        self.run(only="mix", bgm_file=bgm_file, no_bgm=no_bgm)
         LOG.info("Next: reachreel render %s", self.workdir)
-
-    def update_manifest(self) -> None:
-        existing = read_json(self.manifest_path, {}) or {}
-        burned = (
-            self.burned_subtitles
-            if self.burned_subtitles is not None
-            else bool(existing.get("settings", {}).get("burned_subtitles", False))
-        )
-        self.write_manifest(started=time.time(), burned=burned, announce=False)
-        data = read_json(self.manifest_path, {}) or {}
-        if existing.get("elapsed_seconds"):
-            data["elapsed_seconds"] = existing["elapsed_seconds"]
-        data.pop("qa", None)
-        if not data.get("bgm_source") and not self.bgm_disabled:
-            data["bgm_source"] = existing.get("bgm_source")
-        if not data.get("bgm_metadata") and not self.bgm_disabled:
-            data["bgm_metadata"] = existing.get("bgm_metadata")
-        # Stage commands may not load scenes; keep the existing analysis summary.
-        if not self._scenes and existing.get("scenes"):
-            data["scenes"] = existing["scenes"]
-        if not self._segments:
-            for key in ("narration_segments", "narration_chars", "narration_seconds", "timeline"):
-                if key in existing:
-                    data[key] = existing[key]
-        atomic_write_json(self.manifest_path, data)
-        self.write_review()
 
     # ---------- full run ----------
 
@@ -506,35 +570,44 @@ class Pipeline:
             self._segments = segments
 
     def _require_render_inputs(self) -> None:
-        missing = [name for name in ("mix.wav", "subtitles.srt") if not (self.workdir / name).exists()]
-        if missing:
-            raise RuntimeError(
-                f"Render inputs missing: {', '.join(missing)}. Run first: reachreel mix {self.workdir}"
-                f" && reachreel subtitle {self.workdir}"
-            )
+        self._require_current(NARRATION_STAGES)
+        for path, command in ((self.subtitles_path, "subtitle"), (self.mix_path, "mix")):
+            if not path.is_file():
+                raise self._missing_input(path, command, str(self.workdir))
+        self._require_current(("subtitles", "mix"))
         self.load_existing_timeline()
+
+    def _require_current(self, stages: tuple[str, ...]) -> None:
+        manifest = read_json(self.manifest_path, {}) or {}
+        if stale := self.stage_inputs.first_stale(manifest, stages):
+            raise RuntimeError(self.stage_inputs.stale_message(stale))
 
     def _run_stages(
         self,
         stages: list[str],
         *,
+        started: float,
         asr_engine: str,
         bgm_file: Path | None,
         no_bgm: bool,
         burn: bool,
         explicit: bool,
-    ) -> bool | None:
-        burned: bool | None = None
+    ) -> None:
         for stage in stages:
             LOG.info("=== Stage: %s ===", stage_label(stage))
+            inputs = self.stage_inputs.capture(stage)
             if stage == "probe":
                 self.load_video()
             elif stage == "vlm":
                 self.prepare_scenes()
                 self.understand(force=self.force or explicit)
             elif stage == "script":
-                if self._scenes is None:
-                    self.load_scenes_data()
+                self.load_scenes_data()
+                if self._analysis_settings_changed():
+                    raise RuntimeError(t("error.analysis_options_changed", command=shlex.join((
+                        "reachreel", "run", str(self.video), "--workdir", str(self.workdir),
+                        "--only", "vlm,script",
+                    ))))
                 self.write_script(reuse=not explicit)
             elif stage == "tts":
                 self.load_script()
@@ -542,18 +615,24 @@ class Pipeline:
                 self.make_voice()
                 self.make_timeline()
             elif stage == "subtitles":
-                self.load_timeline()
-                self.ensure_narration()
+                self._load_narration_inputs()
                 self.make_subtitles(asr_engine=asr_engine)
             elif stage == "mix":
-                self.load_timeline()
-                self.ensure_narration()
+                self._load_narration_inputs()
                 self.make_mix(bgm_file=bgm_file, no_bgm=no_bgm)
             elif stage == "render":
-                self._require_render_inputs()
-                burned = self.render_final(burn=burn)
-                self.burned_subtitles = burned
-        return burned
+                self.render_final(burn=burn)
+                if output_key := self.stage_inputs.rendered_key():
+                    inputs["output"] = output_key
+                if self.burned_subtitles and (ass_key := self.stage_inputs.rendered_subtitles_key()):
+                    inputs["subtitles.ass"] = ass_key
+            self.refreshed_stages.add(stage)
+            self.write_manifest(
+                started=started,
+                burned=self.burned_subtitles,
+                announce=False,
+                artifact_inputs={stage: inputs} if inputs else None,
+            )
 
     def run(
         self,
@@ -585,8 +664,9 @@ class Pipeline:
 
         started = time.time()
         explicit = selected is not None
-        burned = self._run_stages(
+        self._run_stages(
             [stage for stage in stages if stage != "qa"],
+            started=started,
             asr_engine=asr_engine,
             bgm_file=bgm_file,
             no_bgm=no_bgm,
@@ -594,28 +674,24 @@ class Pipeline:
             explicit=explicit,
         )
 
-        if review_script:
-            self.write_manifest(started=started, burned=False)
+        if "script" in stages and (review_script or explicit):
             self.write_script_md()
             LOG.info("Script review ready: %s", self.script_md_path)
             LOG.info("Edit %s, then run: reachreel tts %s", self.script_path, self.workdir)
-            return self.script_path
-
-        if explicit:
-            if any(stage in stages for stage in ("tts", "subtitles", "mix", "render")):
-                self.update_manifest()
-            if "render" in stages:
-                self.write_review()
-        else:
-            self.write_manifest(started=started, burned=bool(burned))
+        if any(stage in stages for stage in ("tts", "subtitles", "mix", "render")):
             self.write_review()
 
-        if (explicit and "qa" in stages) or (not explicit and qa):
+        if (explicit and "qa" in stages) or (not explicit and qa and not review_script):
             from .qa import attach_to_manifest, print_report, run_qa
 
-            self.qa_report = run_qa(self.workdir, strict=qa_strict)
+            self.qa_report = run_qa(
+                self.workdir, strict=qa_strict, settings_override=self.settings.qa_values()
+            )
             print_report(self.qa_report)
             attach_to_manifest(self.workdir, self.qa_report)
+        if explicit or review_script:
+            return self.workdir / STAGE_ARTIFACTS[stages[-1]]
+        LOG.info("Done: %s (%.1fs)", self.output_path, time.time() - started)
         return self.output_path
 
     def print_dry_run(
@@ -753,6 +829,7 @@ class Pipeline:
         estimates = [
             replace(
                 segment,
+                audio_path="",
                 duration=max(1.0, len(segment.text) / cps),
                 start=0.0,
                 end=0.0,
@@ -778,14 +855,31 @@ class Pipeline:
             t("script_md.section"),
             "",
             t("script_md.table_header"),
-            "|---|---|---|---|---|",
+            "|---|---|---|---|---|---|",
         ]
+        manifest = read_json(self.manifest_path, {}) or {}
+        degraded = {
+            flag.get("params", {}).get("scene")
+            for flag in manifest.get("quality_flags", [])
+            if str(flag.get("code", "")).startswith("vlm.")
+        }
+        by_id = {scene.id: scene for scene in scenes}
         for segment in estimates:
             scene_ids = ", ".join(str(scene_id) for scene_id in segment.scene_ids)
+            evidence = []
+            for scene_id in segment.scene_ids:
+                scene = by_id.get(scene_id)
+                summary = "" if scene is None or scene_id in degraded else " ".join(
+                    part for part in (scene.summary, *scene.actions, *scene.details) if part
+                )
+                evidence.append(f"{scene_id}: {summary or t('script_md.missing_evidence')}")
             lines.append(
                 f"| {segment.id} | {scene_ids} | {segment.start:.1f} | "
-                f"{segment.end:.1f} | {segment.text} |"
+                f"{segment.end:.1f} | {_markdown_cell(segment.text)} | "
+                f"{_markdown_cell(' / '.join(evidence) or t('script_md.missing_evidence'))} |"
             )
+        if self.settings.brief.strip():
+            lines += ["", t("script_md.brief", brief=_markdown_cell(self.settings.brief))]
         lines += [
             "",
             t("script_md.section_edit"),
@@ -826,8 +920,23 @@ class Pipeline:
         ]
         for segment in segments:
             lines.append(
-                f"| {segment.id} | {segment.start:.1f}-{segment.end:.1f}s | {segment.text} |"
+                f"| {segment.id} | {segment.start:.1f}-{segment.end:.1f}s | "
+                f"{_markdown_cell(segment.text)} |"
             )
+        scenes = self._scenes
+        if scenes is None:
+            with suppress(OSError, ValueError, KeyError, TypeError):
+                cached_info, cached_scenes = load_scenes(self.scenes_path)
+                if Path(cached_info.path).resolve() == self.video:
+                    scenes = cached_scenes
+        shot_ends = {scene.id: scene.end for scene in scenes or []}
+        overflow = []
+        for segment in segments:
+            ends = [shot_ends[scene_id] for scene_id in segment.scene_ids if scene_id in shot_ends]
+            if segment.audio_path and ends and segment.end - max(ends) > 0.05:
+                overflow.append(t("review.shot_overflow", id=segment.id, seconds=segment.end - max(ends)))
+        if overflow:
+            lines += ["", t("review.section_shot_budget"), "", *overflow]
         lines += [
             "",
             t("review.section_edit"),
@@ -837,17 +946,32 @@ class Pipeline:
         ]
         (self.workdir / "review.md").write_text("\n".join(lines), encoding="utf-8")
 
-    def write_manifest(self, *, started: float, burned: bool, announce: bool = True) -> None:
+    def write_manifest(
+        self,
+        *,
+        started: float,
+        burned: bool | None,
+        announce: bool = True,
+        artifact_inputs: dict[str, dict[str, str]] | None = None,
+    ) -> None:
         info = self.load_video()
         segments = self._segments or []
         existing = read_json(self.manifest_path, {}) or {}
+        previous = existing.get("settings") or {}
+        invalidated = set(self.refreshed_stages)
+        if invalidated - {"probe"}:
+            invalidated.add("qa")
+        if burned is None:
+            burned = bool(previous.get("burned_subtitles", False))
         kept_flags = [
             flag
             for flag in (existing.get("quality_flags") or [])
             if isinstance(flag, dict)
-            and _flag_stage(str(flag.get("code") or "")) not in self.refreshed_stages
+            and _flag_stage(str(flag.get("code") or "")) not in invalidated
         ]
         data = {
+            **existing,
+            "schema_version": MANIFEST_SCHEMA_VERSION,
             "video": asdict(info),
             "workdir": str(self.workdir),
             "output": str(self.output_path),
@@ -857,11 +981,17 @@ class Pipeline:
                 "tts_engine": self.settings.tts_engine,
                 "voice": self.settings.resolved_voice(),
                 "whisper_model": self.settings.whisper_model,
-                "bgm": str(self.bgm_path) if self.bgm_source and self.bgm_path.exists() else None,
+                "bgm": (
+                    str(self.bgm_path) if self.bgm_source and self.bgm_path.exists()
+                    else None if self.bgm_disabled else previous.get("bgm")
+                ),
                 "burned_subtitles": burned,
             },
             "settings_snapshot": settings_to_dict(self.settings),
-            "bgm_source": str(self.bgm_source) if self.bgm_source else None,
+            "bgm_source": (
+                str(self.bgm_source) if self.bgm_source
+                else None if self.bgm_disabled else existing.get("bgm_source")
+            ),
             "cache": {
                 "enabled": self.shared_cache_root is not None,
                 "dir": str(self.shared_cache_root) if self.shared_cache_root else None,
@@ -869,30 +999,8 @@ class Pipeline:
             },
             "bgm_metadata": self.bgm_metadata
             or (existing.get("bgm_metadata") if not self.bgm_disabled else None),
-            "render_settings": {
-                "output_height": self.settings.output_height,
-                "output_fps": self.settings.output_fps,
-                "crf": self.settings.crf,
-                "preset": self.settings.preset,
-                "audio_bitrate": self.settings.audio_bitrate,
-                "subtitle_font": self.settings.resolved_subtitle_font(),
-                "subtitle_size": self.settings.subtitle_size,
-                "subtitle_preset": self.settings.subtitle_preset,
-                "subtitle_margin_v": self.settings.subtitle_margin_v,
-                "subtitle_margin_left": self.settings.subtitle_margin_left,
-                "subtitle_margin_right": self.settings.subtitle_margin_right,
-                "subtitle_render": self.settings.subtitle_render,
-                "subtitle_outline": self.settings.subtitle_outline,
-                "subtitle_box_padding": self.settings.subtitle_box_padding,
-                "subtitle_max_chars": self.settings.resolved_subtitle_max_chars(),
-                "subtitle_max_lines": self.settings.subtitle_max_lines,
-                "subtitle_max_seconds": self.settings.subtitle_max_seconds,
-                "subtitle_size_unit": "px",
-                "subtitle_layout": "ass",
-                "burn_subtitles": self.settings.burn_subtitles,
-            },
             "quality_flags": merge_quality_flags(kept_flags, self.quality_flags),
-            "scenes": len(self._scenes or []),
+            "scenes": len(self._scenes) if self._scenes is not None else existing.get("scenes", 0),
             "narration_segments": len(segments),
             "narration_chars": sum(len(s.text) for s in segments),
             "narration_seconds": round(sum(s.duration for s in segments), 2),
@@ -906,17 +1014,66 @@ class Pipeline:
                 for s in segments
             ],
             "elapsed_seconds": round(time.time() - started, 1),
+            "artifact_inputs": {
+                **(existing.get("artifact_inputs") or {}),
+                **(artifact_inputs or {}),
+            },
             "files": {
                 "script": str(self.script_path),
                 "subtitles": str(self.subtitles_path),
                 "ass": str(self.ass_path),
                 "narration": str(self.narration_path),
                 "mix": str(self.mix_path),
+                "edit_export": str(self.edit_export_path),
             },
         }
+        if artifact_inputs and "vlm" in artifact_inputs:
+            data["analysis_settings_key"] = self._analysis_settings_key()
+        if artifact_inputs and "render" in artifact_inputs:
+            settings = self.settings
+            data["render_settings"] = {
+                "output_height": settings.output_height,
+                "output_fps": settings.output_fps,
+                "crf": settings.crf,
+                "preset": settings.preset,
+                "audio_bitrate": settings.audio_bitrate,
+                "subtitle_font": settings.resolved_subtitle_font(),
+                "subtitle_size": settings.subtitle_size,
+                "subtitle_preset": settings.subtitle_preset,
+                "subtitle_margin_v": settings.subtitle_margin_v,
+                "subtitle_margin_left": settings.subtitle_margin_left,
+                "subtitle_margin_right": settings.subtitle_margin_right,
+                "subtitle_render": settings.subtitle_render,
+                "subtitle_outline": settings.subtitle_outline,
+                "subtitle_box_padding": settings.subtitle_box_padding,
+                "subtitle_max_chars": settings.resolved_subtitle_max_chars(),
+                "subtitle_max_lines": settings.subtitle_max_lines,
+                "subtitle_max_seconds": settings.subtitle_max_seconds,
+                "subtitle_size_unit": "px",
+                "subtitle_layout": "ass",
+                "burn_subtitles": settings.burn_subtitles,
+                "content_language": settings.content_language,
+                "subtitle_text": settings.subtitle_text,
+                "max_speedup": settings.max_speedup,
+                "target_lufs": settings.target_lufs,
+            }
+        if self._segments is None:
+            for key in ("narration_segments", "narration_chars", "narration_seconds", "timeline"):
+                if key in existing:
+                    data[key] = existing[key]
+        if "qa" in invalidated:
+            data.pop("qa", None)
         atomic_write_json(self.manifest_path, data)
         if announce:
             LOG.info("Done: %s (%.1fs)", self.output_path, time.time() - started)
+
+
+def _data_key(value: Any) -> str:
+    return sha1_text(json.dumps(value, ensure_ascii=False, sort_keys=True))
+
+
+def _markdown_cell(value: str) -> str:
+    return " ".join(value.splitlines()).replace("|", "\\|")
 
 
 def _flag_stage(code: str) -> str:
@@ -932,7 +1089,10 @@ def _flag_stage(code: str) -> str:
 
 def _load_segments(data: dict[str, Any]) -> list[NarrationSegment]:
     result = []
-    for item in data.get("segments", []) or []:
+    items = data.get("segments") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return result
+    for item in items:
         try:
             result.append(
                 NarrationSegment(
@@ -1116,11 +1276,12 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001
             add("tts.ref_audio", "TTS ref_audio", str(exc), False)
 
+    endpoint = public_ollama_url(settings.ollama_url) or t("doctor.missing")
     try:
         with urllib.request.urlopen(f"{settings.ollama_url.rstrip('/')}/api/tags", timeout=4) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         names = [m.get("name", "") for m in data.get("models", [])]
-        add("ollama", t("doctor.ollama"), settings.ollama_url)
+        add("ollama", t("doctor.ollama"), endpoint)
         for model in (settings.vlm_model, settings.llm_model):
             present = any(
                 name == model or name.startswith(model.split(":")[0] + ":") for name in names
@@ -1135,7 +1296,10 @@ def doctor_report(settings: Settings) -> dict[str, Any]:
         add(
             "ollama",
             t("doctor.ollama"),
-            t("doctor.unreachable", url=settings.ollama_url, error=exc),
+            t(
+                "doctor.unreachable", url=endpoint,
+                error=str(exc) if endpoint == settings.ollama_url else type(exc).__name__,
+            ),
             False,
         )
 

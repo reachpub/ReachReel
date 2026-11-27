@@ -92,7 +92,9 @@ qa
 | `src/reachreel/media/subtitles.py` | Whisper transcription, speech windows, SRT, ASS layout | `cues_from_timeline`, `build_subtitles`, `write_ass` |
 | `src/reachreel/media/audio.py` | BGM selection/looping, catalog metadata, license export, sidechain ducking, loudness | `pick_bgm`, `mix_audio`, `bgm_metadata`, `bgm_license_markdown` |
 | `src/reachreel/media/render.py` | Scaling/frame rate, burned-in/soft subtitles, muxing | `render`, `subtitle_style` |
+| `src/reachreel/media/edit_export.py` | Clean video encoding and editor XML serialization | `write_edit_bundle` |
 | `src/reachreel/pipeline/orchestrator.py` | Stage orchestration, caching, manifest, doctor | `Pipeline`, `doctor`, `doctor_report` |
+| `src/reachreel/pipeline/stage_inputs.py` | Shared input verification for orchestration and standalone QA | `StageInputs` |
 | `src/reachreel/pipeline/qa.py` | Final-cut quality gate | `run_qa`, `print_report`, `parse_srt` |
 | `scripts/check_commit_messages.py` | Conventional Commits validator shared by the pre-commit hook and CI | `validate`, `messages_in_range` |
 | `scripts/apdev_charset.json` | Charset for `apdev check-chars`: ASCII + emoji + CJK punctuation, Chinese ideographs illegal | — |
@@ -144,15 +146,16 @@ All intermediate files live under `workdir/` and use UTF-8 JSON.
 - `width` / `height` are the **display resolution**: if the video carries 90°/270° rotation metadata, width and height are swapped.
 - `coded_width` / `coded_height` are the encoded frame size before rotation is applied; `0` means an old work directory that predates these fields.
 - `frames` are absolute paths.
+- `inputs_key` records the source and the settings used for scene detection and frame extraction. A run that selects the VLM stage can refresh older `scenes.json` files that lack the key.
 - VLM fields may be empty; the script stage has a fallback.
 
 ### 4.2 `vlm_cache.json`
 
 ```json
 {
-  "settings": "zh|qwen3-vl:8b-instruct|vf-vlm-2|768|已知背景...",
+  "settings": "<settings-hash>",
   "scenes": {
-    "1:0.000:7.740": {
+    "<scene-hash>": {
       "summary": "...",
       "place": "...",
       "subjects": [],
@@ -166,9 +169,10 @@ All intermediate files live under `workdir/` and use UTF-8 JSON.
 }
 ```
 
-- The cache key includes the content language, model, prompt version, frame extraction width, and `brief`.
-- Changing these settings invalidates the cache.
-- `--force` deletes the cache file.
+- `settings` fingerprints the VLM endpoint, content language, model, prompt and its version, frame width, deduplication threshold, and `brief`.
+- Each scene key fingerprints the scene ID, time bounds, and ordered frame contents. This lets different work directories reuse results for the same inputs.
+- The cache stores successful results. A later run can retry failed or degraded scenes, including missing frames and unparsed model responses. Older cache keys are rebuilt on use.
+- `--force` bypasses work directory and shared cache reads. Successful forced analysis can populate the caches again.
 
 ### 4.3 `script.json`
 
@@ -193,6 +197,7 @@ All intermediate files live under `workdir/` and use UTF-8 JSON.
 - `text` is a human-editable field;
 - `audio_path` / `duration` / `start` / `end` / `tts_speed` are filled in by later stages;
 - `scene_ids` determines which scene the narration is anchored to.
+- Generated scripts also record `generation.inputs_key` (the writing inputs) and `generation.segments_key` (the generated segments). These hashes let a normal resume update a generated script when inputs change while preserving a manually edited one. Scripts from older versions remain reusable when the content language matches.
 
 ### 4.4 `timeline.json`
 
@@ -220,6 +225,7 @@ Key fields:
 
 ```json
 {
+  "schema_version": 2,
   "video": { "...": "same as scenes.json" },
   "workdir": "...",
   "output": "...",
@@ -290,7 +296,9 @@ Key fields:
 }
 ```
 
-`render_settings` lets `reachreel render` reproduce the previous output size, subtitle style, and CRF.
+`settings_snapshot` holds the latest job settings for the next command. In schema version 2, `render_settings` records the settings of the last successful render for QA. Only a successful render updates it. Legacy manifests still supply their saved settings when a stage resumes.
+
+`artifact_inputs` records stage input fingerprints, plus the published movie and hard-subtitle sidecar for a successful render. Media identities use the sampled video fingerprint and modification time. The TTS scene fingerprint covers timing and duration, so a change to a scene description alone does not invalidate narration timing. Standalone QA and the pipeline share these checks through `StageInputs`; legacy work directories use available fingerprints and modification times until their stages run again.
 
 `quality_flags` records degradations that did not stop the run. Current codes:
 
@@ -321,6 +329,7 @@ Key fields:
 | `qa.json` | QA gate results |
 | `licenses.md` | BGM license list exported by `reachreel licenses` |
 | `final.mp4` | Final cut |
+| `edit/` | Optional editing bundle with a relative file inventory in `edit/manifest.json` |
 
 ### 4.7 Shared cache (optional)
 
@@ -509,14 +518,17 @@ Stage entry points exposed by `Pipeline`:
 
 | Method | Command | Input | Output |
 |---|---|---|---|
-| `stage_script` | `reachreel script` | `scenes.json` + VLM cache | `script.json` |
-| `stage_tts` | `reachreel tts` | `script.json` | `tts/` + `timeline.json` + `narration.wav` |
+| `stage_analyze` | `reachreel analyze` | Source video | `scenes.json` + `manifest.json` |
+| `stage_script` | `reachreel script` | `scenes.json` | `script.json` + `script.md` |
+| `stage_tts` | `reachreel tts` | `script.json` + `scenes.json` | `tts/` + `timeline.json` + `narration.wav` |
 | `stage_subtitle` | `reachreel subtitle` | `timeline.json` + `narration.wav` | `subtitles.srt` + `subtitles.ass` |
-| `stage_mix` | `reachreel mix` | `narration.wav` + BGM | `mix.wav` |
+| `stage_mix` | `reachreel mix` | `timeline.json` + `narration.wav` + optional BGM | `mix.wav` |
 | `render_final` | `reachreel render` | `mix.wav` + SRT/ASS | `final.mp4` |
 | `run_qa` | `reachreel qa` | `final.mp4` + intermediate files | `qa.json` |
 
-Stage commands restore parameters from `settings_snapshot` / `render_settings` in `manifest.json`; command-line arguments take precedence.
+`analyze` and `run --only vlm,script` persist `manifest.json` before the next command loads the work directory. The manifest supplies saved settings. Explicit configuration keys, environment variables, and CLI options override those settings in that order. Both render commands go through `Pipeline` so the saved render settings and QA state follow the same path.
+
+`Pipeline.export_edit` reads the original video and existing narration, subtitles, and optional mix. The media module owns the editing codecs and the two XML serializers because the publishing renderer produces a single composited movie. Each export writes a temporary sibling directory and publishes the complete bundle with a rename. The job manifest declares the default destination in `files.edit_export`, and the bundle manifest lists the files relative to the bundle root. The XML references the assets at the destination so it can be imported directly there.
 
 ### 5.11 QA gate
 
@@ -541,13 +553,13 @@ Local inputs live under `inputs/` and are ignored by Git: `inputs/bgm/` is used 
 
 | Cache | Location | Invalidation |
 |---|---|---|
-| Scenes/frames | `scenes.json` + `frames/` | `--force`, video path change, `--no-resume` |
-| VLM | `vlm_cache.json` | `--force`, model/prompt/width/`brief` change |
-| Narration | `script.json` | `--force`, `--no-resume`, manual deletion |
-| TTS | `tts/seg_*_<hash>.wav` | text/voice/model/speed change, `--force` |
+| Scenes/frames | `scenes.json` + `frames/` | Source identity, scene detection or frame settings change, missing frames, `--force`, `--no-resume` |
+| VLM | `vlm_cache.json` | VLM settings, scene bounds or frame content change, `--force` |
+| Narration | `script.json` | Writing inputs change for a tracked and unedited draft, explicit script regeneration, `--force`, `--no-resume` |
+| TTS | `tts/seg_*_<hash>.wav` | Text or active voice and synthesis settings change, `--force` |
 | Render | `final.mp4` | rerendered on every `run` |
 
-`Pipeline` checks that the video path matches when reusing `scenes.json`; if it does not, it re-analyzes.
+The VLM stage refreshes scene detection and frames when its prerequisites change. The commands that start later read their saved inputs and report the prerequisite command when an input is missing.
 
 ---
 
@@ -647,23 +659,22 @@ Principles:
 
 ```bash
 cd /path/to/reachreel
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -e .
+uv sync --python 3.12
 source .venv/bin/activate
 
 reachreel doctor
-uvx ruff check src/reachreel tests scripts
-python -m unittest discover -s tests -v
-
-pre-commit install                    # installs the pre-commit and commit-msg hooks
+uv run ruff check src/reachreel tests scripts
+.venv/bin/python -m unittest discover -s tests -v
 ```
+
+`uv sync` installs pytest and Ruff through the default `dev` dependency group. The test command above matches CI.
 
 Development requires macOS on Apple silicon. `reachreel doctor` reports a failing `Platform` check on Intel macOS, Linux, and Windows, because MLX ships no x86_64 macOS build.
 
 ### Maintainer tooling (`.[dev]`)
 
 ```bash
-uv pip install --python .venv/bin/python -e '.[dev]'
+uv sync --extra dev
 apdev check-imports                                      # dependency direction stays acyclic
 apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel -name '*.py')
 ```
@@ -677,13 +688,13 @@ apdev check-chars --charset-file scripts/apdev_charset.json $(find src/reachreel
 
 `[tool.apdev]` also feeds `apdev release`, which verifies that `pyproject.toml` and `reachreel.__version__` agree, builds with `python -m build`, runs `twine check`, and then offers the tag / GitHub-release / PyPI steps. Cut the version first, then hand over:
 
-1. move the `[Unreleased]` entries into a new `## [x.y.z] - YYYY-MM-DD` section in both changelogs;
-2. bump `version` in `pyproject.toml` and `__version__` in `src/reachreel/__init__.py`;
-3. `apdev release` (add `--yes` for the non-interactive path).
+1. Set the release heading to `## [x.y.z] - YYYY-MM-DD` in both changelogs. If the version already has a pending section, add the release date and remove its unpublished note.
+2. Set `version` in `pyproject.toml` and reinstall the editable package so `reachreel.__version__` reads the new installed metadata.
+3. Run `apdev release` (add `--yes` for the non-interactive path).
 
 Tags use a `v` prefix (`v0.3.0`).
 
-**Cadence**: release when a version is worth announcing, not per commit. One release per day is the ceiling, and it should carry a meaningful iteration — a new capability, a user-visible behaviour change, or a batch of fixes worth a version number. Documentation, CI and tooling changes accumulate in `[Unreleased]` until the next real release.
+**Cadence**: release when a version is worth announcing, not per commit. One release per day is the ceiling, and it should carry a meaningful iteration — a new capability, a user-visible behaviour change, or a batch of fixes worth a version number. Documentation, CI and tooling changes accumulate in the pending changelog section until the next release.
 
 ### Publishing to PyPI
 
@@ -763,7 +774,7 @@ A new section heading must be registered in `SECTIONS` inside the script; the ch
 | `commit-message` (commit-msg stage) | `scripts/check_commit_messages.py` |
 
 ```bash
-uv pip install --python .venv/bin/python -e '.[dev]'
+uv sync --extra dev
 pre-commit install          # both stages, via default_install_hook_types
 ```
 
@@ -791,7 +802,7 @@ Running it for the first time found 18 `[qa]` thresholds that were in `Settings`
 | `checks` | `ubuntu-latest` | commit messages, changelog parity, `apdev check-chars` on Python sources, `apdev check-imports`, configuration surface |
 | `test` | `macos-15` × Python 3.11/3.12 | Ruff, unit tests, `uv build` (3.12 only) |
 
-The `checks` job needs no virtualenv and finishes in seconds, so a bad commit subject fails before a macOS runner is even allocated. `tests/integration` is never part of CI; run it with `REACHREEL_INTEGRATION=1`.
+The `checks` job needs no virtualenv, so it catches malformed commit subjects early. The Python 3.12 macOS job runs the model-free media tests. Set `REACHREEL_INTEGRATION=1` to run the full integration suite locally.
 
 ### Synthetic test footage
 
@@ -833,12 +844,12 @@ Current:
 - `tests/integration/test_scenes.py`: opt-in FFmpeg-only fixtures — a three-colour clip with cuts at 2 s / 4 s for `detect_scenes` (boundaries, `min_len` merge, `max_len` split), no-audio / mono / 5.1 clips for `probe_video` channel reporting, and 90° / 180° / 270° clips for coded-vs-display dimensions.
 - `tests/integration/test_timeline.py`: opt-in fixture for the narration speed-up path — generated WAVs overrun the clip, so `place_segments` must call `atempo`, rewrite `audio_path`, and shorten the durations; the no-fit case is asserted to leave files untouched.
 - `tests/integration/test_smoke.py::OnlyReuseTest`: opt-in `run --only` reuse smoke that hashes `scenes.json` / `narration.wav` / `subtitles.srt` to prove earlier stages are not redone.
-- CI: `.github/workflows/ci.yml` runs Ruff, the unit suite, and `uv build` on `macos-15` (Apple silicon) for Python 3.11 and 3.12. The label is pinned on purpose: GitHub retires macOS images regularly, and a retired label fails every job at queue time with `<configuration> is not supported`, not with a test failure. Only currently supported arm64 labels are used; Intel macOS is not targeted. Integration tests are not part of CI; run them locally with `REACHREEL_INTEGRATION=1`.
+- CI runs Ruff and unit tests on `macos-15` for Python 3.11 and 3.12. The Python 3.12 job also builds the package and runs model-free resume, scene, timeline, and editing-export integration tests. Set `REACHREEL_INTEGRATION=1` locally to run the full integration suite, including the macOS `say` smoke tests.
 - No golden outputs yet.
 
 Suggested additions:
 
-1. a full `run` smoke that asserts `--only` reuse across every stage pair;
+1. more upstream/downstream stage combinations for `--only` resume;
 2. QA threshold tuning against real footage (the fixtures are synthetic);
 3. a stage-command smoke on a rotated portrait clip end to end.
 
@@ -877,8 +888,8 @@ Done: scene detection fixtures, the mix filter graph, manifest `render_settings`
 
 ## 12. Release checklist
 
-- [ ] `uvx ruff check src/reachreel tests scripts` passes;
-- [ ] `python -m unittest discover -s tests` passes;
+- [ ] `uv run ruff check src/reachreel tests scripts` passes;
+- [ ] `.venv/bin/python -m unittest discover -s tests -v` passes;
 - [ ] `reachreel doctor` passes;
 - [ ] Run once with one landscape and one portrait clip;
 - [ ] Check burned-in subtitles, soft subtitles, no BGM, and no audio track;

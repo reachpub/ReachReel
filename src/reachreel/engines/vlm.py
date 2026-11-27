@@ -11,8 +11,9 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
-from ..core.util import atomic_write_json, read_json
+from ..core.util import atomic_write_json, read_json, sha1_file, sha1_text
 from ..domain.models import QualityFlag, Scene
 from ..prompts import load_prompt, text
 
@@ -107,6 +108,10 @@ def _image_data_uri(path: Path) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
 
+def _scene_frames(scene: Scene) -> list[Path]:
+    return [frame for frame in map(Path, scene.frames) if frame.is_file()]
+
+
 def analyze_scene(
     client: OllamaClient,
     scene: Scene,
@@ -115,7 +120,7 @@ def analyze_scene(
     context: str = "",
     content_language: str = "zh",
 ) -> dict[str, Any]:
-    frames = [Path(p) for p in scene.frames if Path(p).exists()]
+    frames = _scene_frames(scene)
     if not frames:
         return {
             "summary": text(
@@ -194,16 +199,55 @@ def settings_key(
     max_width: int,
     frame_dedup: float,
     context: str,
+    base_url: str = "http://localhost:11434",
 ) -> str:
-    """Cache key for one VLM configuration.
+    """Fingerprint the endpoint, prompt, and options for VLM analysis."""
+    try:
+        url = urlsplit(base_url.rstrip("/"))
+    except ValueError:
+        # Let the request path report a bad endpoint without persisting the raw URL.
+        endpoint = ("", sha1_text(base_url), "")
+    else:
+        endpoint = (url.scheme, url.netloc.rsplit("@", 1)[-1].lower(), url.path)
+    settings = {
+        "endpoint": endpoint,
+        "language": content_language,
+        "model": model,
+        "prompt_version": PROMPT_VERSION,
+        "prompt": load_prompt(content_language, "vlm"),
+        "max_width": max_width,
+        "frame_dedup": frame_dedup,
+        "context": context,
+    }
+    return sha1_text(json.dumps(settings, sort_keys=True))
 
-    Every input that changes the analysis belongs here: language, model, prompt
-    version, frame width, the duplicate-frame threshold, and the user brief.
-    """
-    return (
-        f"{content_language}|{model}|{PROMPT_VERSION}|{max_width}|"
-        f"{frame_dedup:.2f}|{context}"
-    )
+
+def _scene_key(scene: Scene) -> str | None:
+    # Only the ordered image bytes affect the request; absolute paths vary between jobs.
+    try:
+        frames = [sha1_file(frame) for frame in _scene_frames(scene)]
+    except OSError:
+        return None
+    return sha1_text(json.dumps([scene.id, scene.start, scene.end, frames]))
+
+
+def _successful_result(value: Any) -> bool:
+    # All existing quality flags describe degraded results that a later run may recover.
+    return isinstance(value, dict) and bool(value) and not value.get("quality")
+
+
+def _load_scene_cache(path: Path | None, key: str) -> dict[str, dict[str, Any]]:
+    cache = read_json(path, {}) if path is not None else {}
+    if not isinstance(cache, dict) or cache.get("settings") != key:
+        return {}
+    scenes = cache.get("scenes")
+    if not isinstance(scenes, dict):
+        return {}
+    return {scene_key: result for scene_key, result in scenes.items() if _successful_result(result)}
+
+
+def _save_scene_cache(path: Path, key: str, scenes: dict[str, dict[str, Any]]) -> None:
+    atomic_write_json(path, {"settings": key, "scenes": scenes})
 
 
 def analyze_scenes(
@@ -220,111 +264,93 @@ def analyze_scenes(
     content_language: str = "zh",
     frame_dedup: float = 0.0,
 ) -> list[QualityFlag]:
-    cache = {} if force or not cache_path else (read_json(cache_path, {}) or {})
     settings_key_value = settings_key(
         content_language=content_language,
         model=model,
         max_width=max_width,
         frame_dedup=frame_dedup,
         context=context,
+        base_url=base_url,
     )
-    if cache.get("settings") != settings_key_value:
-        cache = {"settings": settings_key_value, "scenes": {}}
-    scene_cache: dict[str, Any] = cache.setdefault("scenes", {})
-    if shared_cache_path is not None and not force:
-        shared = read_json(shared_cache_path, {}) or {}
-        if shared.get("settings") == settings_key_value:
-            for key, value in (shared.get("scenes") or {}).items():
-                scene_cache.setdefault(key, value)
+    scene_cache = {} if force else _load_scene_cache(cache_path, settings_key_value)
+    shared_cache = {} if force else _load_scene_cache(shared_cache_path, settings_key_value)
 
-    client = OllamaClient(base_url, model)
-    pending = []
-    for scene in scenes:
-        key = f"{scene.id}:{scene.start:.3f}:{scene.end:.3f}"
-        if key in scene_cache:
-            _apply(scene, scene_cache[key])
+    results: list[dict[str, Any]] = [{} for _ in scenes]
+    pending: list[tuple[int, str | None]] = []
+    for index, scene in enumerate(scenes):
+        key = _scene_key(scene)
+        if key is not None and (cached := scene_cache.get(key) or shared_cache.get(key)):
+            scene_cache[key] = cached
+            results[index] = cached
+            _apply(scene, cached)
         else:
-            pending.append((key, scene))
+            pending.append((index, key))
 
-    if not pending:
+    if pending:
+        client = OllamaClient(base_url, model)
+        LOG.info("Analyzing %d scenes with the local VLM (%s)...", len(pending), model)
+        with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+            futures = {
+                pool.submit(
+                    analyze_scene,
+                    client,
+                    scenes[index],
+                    max_width=max_width,
+                    context=context,
+                    content_language=content_language,
+                ): (index, key)
+                for index, key in pending
+            }
+            for completed, future in enumerate(as_completed(futures), start=1):
+                index, key = futures[future]
+                scene = scenes[index]
+                try:
+                    result = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    LOG.warning("Scene %d analysis failed: %s", scene.id, exc)
+                    result = _scene_failure(scene, exc, content_language)
+                results[index] = result
+                if key is not None and _successful_result(result):
+                    scene_cache[key] = result
+                _apply(scene, result)
+                LOG.info(
+                    "  [%d/%d] scene %d: %s",
+                    completed,
+                    len(pending),
+                    scene.id,
+                    (scene.summary or "no description")[:60],
+                )
+                if cache_path and completed % 3 == 0:
+                    _save_scene_cache(cache_path, settings_key_value, scene_cache)
+    else:
         LOG.info("VLM analysis cache hit (%d scenes)", len(scenes))
-        if cache_path:
-            atomic_write_json(cache_path, cache)
-        if shared_cache_path is not None:
-            _write_shared(shared_cache_path, settings_key_value, scene_cache)
-        return _collect_quality(scenes, scene_cache)
-
-    LOG.info("Analyzing %d scenes with the local VLM (%s)...", len(pending), model)
-    completed = 0
-    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
-        futures = {
-            pool.submit(
-                analyze_scene,
-                client,
-                scene,
-                max_width=max_width,
-                context=context,
-                content_language=content_language,
-            ): (key, scene)
-            for key, scene in pending
-        }
-        for future in as_completed(futures):
-            key, scene = futures[future]
-            try:
-                result = future.result()
-            except Exception as exc:  # noqa: BLE001
-                LOG.warning("Scene %d analysis failed: %s", scene.id, exc)
-                result = {
-                    "summary": text(
-                        content_language,
-                        "vlm.scene_failed",
-                        id=scene.id,
-                    ),
-                    "place": text(content_language, "vlm.unknown"),
-                    "subjects": [],
-                    "actions": [],
-                    "details": [],
-                    "mood": "",
-                    "narration_hint": "",
-                    "quality": {
-                        "code": "vlm.scene_failed",
-                        "params": {"scene": scene.id, "error": str(exc)[:200]},
-                        "severity": "warning",
-                    },
-                }
-            scene_cache[key] = result
-            _apply(scene, result)
-            completed += 1
-            LOG.info(
-                "  [%d/%d] scene %d: %s",
-                completed,
-                len(pending),
-                scene.id,
-                (scene.summary or "no description")[:60],
-            )
-            if cache_path and completed % 3 == 0:
-                atomic_write_json(cache_path, cache)
 
     if cache_path:
-        atomic_write_json(cache_path, cache)
-    if shared_cache_path is not None:
-        _write_shared(shared_cache_path, settings_key_value, scene_cache)
-    return _collect_quality(scenes, scene_cache)
+        _save_scene_cache(cache_path, settings_key_value, scene_cache)
+    if shared_cache_path is not None and scene_cache:
+        shared = _load_scene_cache(shared_cache_path, settings_key_value)
+        combined = shared | scene_cache if force else scene_cache | shared
+        if combined != shared:
+            _save_scene_cache(shared_cache_path, settings_key_value, combined)
+    return _collect_quality(results)
 
 
-def _write_shared(path: Path, settings_key: str, scene_cache: dict[str, Any]) -> None:
-    shared = read_json(path, {}) or {}
-    if shared.get("settings") != settings_key:
-        shared = {"settings": settings_key, "scenes": {}}
-    shared.setdefault("scenes", {}).update(scene_cache)
-    atomic_write_json(path, shared)
+def _scene_failure(scene: Scene, exc: Exception, content_language: str) -> dict[str, Any]:
+    return {
+        "summary": text(content_language, "vlm.scene_failed", id=scene.id),
+        "place": text(content_language, "vlm.unknown"),
+        "quality": {
+            "code": "vlm.scene_failed",
+            "params": {"scene": scene.id, "error": str(exc)[:200]},
+            "severity": "warning",
+        },
+    }
 
 
-def _collect_quality(scenes: list[Scene], scene_cache: dict[str, Any]) -> list[QualityFlag]:
+def _collect_quality(results: list[dict[str, Any]]) -> list[QualityFlag]:
     flags: list[QualityFlag] = []
-    for scene in scenes:
-        key = f"{scene.id}:{scene.start:.3f}:{scene.end:.3f}"
-        quality = (scene_cache.get(key) or {}).get("quality")
+    for result in results:
+        quality = result.get("quality")
         if not isinstance(quality, dict) or not quality.get("code"):
             continue
         params = quality.get("params")

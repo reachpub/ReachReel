@@ -202,6 +202,23 @@ reachreel run /path/to/video.mp4 \
   --height 1080 --fps 30
 ```
 
+<a name="character-focused-narration"></a>
+
+### 人物解说
+
+- 用 `--brief` 告诉 ReachReel **需要知道哪些背景**。可以写拍摄地点、人物身份，以及他们做了什么、说了什么。写人物解说时，补充能体现性格、习惯或专业知识的具体动作、反复出现的行为或判断。画面分析和旁白生成都会参考这些信息。
+- 用 `--style` 告诉 ReachReel **要怎么讲**。可以指定叙述视角、口吻和想突出的特征，比如用第三人称通过人物的动作体现他的专业知识。填写 `--style` 会覆盖 `--style-preset`。
+
+下面的例子通过咖啡师调整萃取的过程，体现他做事细致。加上 `--review-script`，生成脚本后会暂停，可以先在 `output/barista/script.md` 里看旁白，再配音。
+
+```bash
+reachreel run video.mp4 --workdir output/barista --content-language zh --review-script \
+  --brief '主角是咖啡师阿杰。第一杯萃取得比预期快。他看了眼计时器，把研磨调细一格，用同样的粉量再试一杯。' \
+  --style '用自然口语做第三人称解说。讲清阿杰怎么调整研磨、哪些条件保持原样，通过这些细节体现他做事细致。'
+```
+
+旁白可以写成「第一杯出得快了。阿杰看了眼计时器，把研磨调细一格。下一杯，他还用原来的粉量。」
+
 ### 运行过程会发生什么
 
 1. `读取视频`：ffprobe 读取时长、分辨率、帧率、音轨。
@@ -258,8 +275,8 @@ reachreel run VIDEO [options]
 | `--vlm-frames N` | `3` | 每个镜头抽帧数 |
 | `--vlm-dedup X` | `4.0` | 与上一张保留帧的差异低于 `X` 的帧会被丢弃（`0` 表示关闭去重） |
 | `--scene-threshold X` | `0.32` | 镜头切换阈值；越低越敏感 |
-| `--style TEXT` | 内置 | 旁白风格提示 |
-| `--brief TEXT` | 空 | 拍摄地/人物/背景信息 |
+| `--style TEXT` | 内置 | 旁白怎么讲，包括叙述视角、口吻和重点 |
+| `--brief TEXT` | 空 | 视频背景，包括拍摄地、人物以及他们做过或说过的事 |
 | `--density X` | `0.62` | 旁白密度 0.2–1.0；越低留白越多 |
 | `--max-speedup X` | `1.32` | 旁白过长时允许的最大加速 |
 | `--asr MODE` | `mlx-whisper` | `mlx-whisper` 或 `none`（用 TTS 时间轴） |
@@ -280,7 +297,7 @@ reachreel run VIDEO [options]
 | `--only STAGES` | 全部 | 只运行指定阶段，逗号分隔，如 `vlm,script` |
 | `--dry-run` | 关 | 只打印将要运行的阶段和缓存状态，不调用模型、不写文件 |
 | `--review-script` | 关 | 跑到脚本阶段停下，输出 `script.md` 供人工确认 |
-| `--force` | 关 | 忽略所有中间产物，全部重做 |
+| `--force` | 关 | 重新生成选中的阶段，跳过工作目录缓存和共享缓存的读取 |
 | `--no-resume` | 关 | 不复用场景/解说，但保留 VLM/TTS 缓存 |
 | `--verbose` | 关 | 调试日志 |
 
@@ -310,11 +327,13 @@ reachreel run video.mp4 --content-language en --height 1080 --fps 30
 reachreel run video.mp4 --content-language en --tts-language en-GB --voice bf_emma
 ```
 
-`--only` 的可用阶段：`probe`、`vlm`（别名 `analyze`）、`script`、`tts`、`subtitles`（别名 `subtitle`）、`mix`、`render`、`qa`。选中的阶段会主动重做；未选中的阶段不动。依赖的中间文件不存在时会给出可执行的下一步提示。
+`--only` 接受 `probe`、`vlm`（别名 `analyze`）、`script`、`tts`、`subtitles`（别名 `subtitle`）、`mix`、`render`、`qa`。选中的阶段按流水线顺序执行。缺少中间文件时会给出补跑前置阶段的命令。
+
+`run --only` 回显最后一个所选阶段的产物路径。例如，`run --only vlm,script` 回显 `script.json`，随后可用 `reachreel tts <workdir>` 接续。依赖命令回显成片路径的脚本应让 `render` 成为最后一个阶段。
 
 ### 7.2 `reachreel analyze`
 
-只做镜头检测 + 抽帧 + VLM 分析，不写稿、不配音。
+执行镜头检测、抽帧和 VLM 分析，回显 `scenes.json`，并保存可由 `reachreel script <workdir>` 接续的工作目录。
 
 ```bash
 reachreel analyze video.mp4 --workdir output/analysis
@@ -343,7 +362,9 @@ reachreel render output/ski_20261121_203000 --subtitle-size 52 --subtitle-margin
 reachreel render output/ski_20261121_203000 --no-burn
 ```
 
-它会读取工作目录 `manifest.json` 里的 `render_settings`，保持上次的字幕样式和输出尺寸，除非你用参数覆盖。
+默认沿用已保存的输出尺寸、字幕样式和硬字幕或软字幕模式。可用 `--config` 或渲染参数覆盖这些设置。
+
+替换原片后先重跑 `analyze`。配音后修改文案或镜头时间点，需重跑 `reachreel tts <workdir>`。渲染和导出会检查字幕、混音是否过时，并提示补跑命令。仍可直接编辑 `subtitles.srt` 后重新渲染。渲染成功后会替换成片并清除旧 QA 摘要。编码失败时会保留上一版成片及其报告。
 
 ### 7.4 `reachreel doctor`
 
@@ -372,7 +393,7 @@ reachreel doctor --json
 完整跑一遍很慢；改文案、改字幕、换 BGM 时只重做对应阶段：
 
 ```bash
-# 只重写解说词：复用 scenes.json / VLM 缓存，重新调用本地 LLM
+# 根据已有的 scenes.json 重新生成文案
 reachreel script output/xxx
 
 # 只重新配音 + 重算旁白时间轴
@@ -381,7 +402,7 @@ reachreel tts output/xxx
 # 只重做字幕：默认 mlx-whisper；也可以 --asr none 用 TTS 时间轴
 reachreel subtitle output/xxx
 
-# 只重做混音：默认沿用 manifest 里的 BGM 来源
+# 只重做混音。同一 BGM 目录可复用自动选曲结果。
 reachreel mix output/xxx
 reachreel mix output/xxx --no-bgm
 reachreel mix output/xxx --bgm inputs/bgm/another.mp3
@@ -393,7 +414,9 @@ reachreel render output/xxx
 reachreel qa output/xxx
 ```
 
-阶段命令会读取 `manifest.json` 里的设置（模型、音色、渲染参数），命令行参数优先。
+阶段命令以 `manifest.json` 中保存的设置为基础，依次应用 `--config` 中显式设置的字段、环境变量和命令行参数。[配置优先级](CONFIGURATION.md#precedence)
+
+`reachreel script` 会在 VLM 设置改变时重新分析镜头。使用 `run --only` 时，需要包含 `vlm,script` 才能应用这些变化。传入新的 `--bgm-dir` 会从该目录重新选曲，显式传入的 `--bgm` 仍优先。
 
 ### 7.6 `reachreel qa`
 
@@ -419,7 +442,7 @@ reachreel qa output/xxx --config config.toml   # 用 [qa] 阈值覆盖 manifest
 - BGM 文件是否存在；
 - 硬字幕/软字幕模式是否匹配。
 
-阈值可在 `config.toml` 的 `[qa]` 表里调整，详见[配置参考](CONFIGURATION.md#10-qa-阈值)。`qa.json` 会记录本次使用的阈值。
+`qa.json` 会记录本次使用的阈值。可以在 `config.toml` 的 `[qa]` 表中调整这些值。[配置参考](CONFIGURATION.md#10-qa-thresholds)
 
 退出码：
 
@@ -428,6 +451,8 @@ reachreel qa output/xxx --config config.toml   # 用 [qa] 阈值覆盖 manifest
 - `--strict`：有警告也返回 `1`。
 
 结果写入 `qa.json`。`reachreel run` 默认也会跑一次 QA；不想跑加 `--no-qa`。
+
+QA 会校验成片与记录的输入是否一致。更新旁白、字幕或混音后，请按提示补跑对应阶段，再渲染成片并执行 QA。
 
 硬字幕的像素超框检查会按 SRT 时长在 1080p 黑底上渲染一遍字幕层（2–4 fps），通常多花几秒；不需要时可在 `[qa]` 里设 `skip_subtitle_pixels = true`。
 
@@ -470,10 +495,11 @@ reachreel --cache-dir /tmp/rr-cache run video.mp4
 ```text
 output/<视频名>_<时间戳>/
 ├── final.mp4          # 成片
+├── edit/              # 可选的剪辑素材包（reachreel export）
 ├── subtitles.srt      # 字幕（软字幕/兼容）
 ├── subtitles.ass      # 硬字幕布局（PlayRes = 输出分辨率）
 ├── script.json        # 分段解说词（可编辑）
-├── script.md          # 脚本确认用的预览
+├── script.md          # 可选的审稿预览，包含镜头证据
 ├── scenes.json        # 镜头 + VLM 分析
 ├── vlm_cache.json     # VLM 断点缓存
 ├── timeline.json      # 旁白落点
@@ -588,13 +614,13 @@ CRF 越大文件越小、画质越低。默认 18，建议 20–23。
 
 ### 10.1 改文案
 
-编辑：
+加上 `--review-script` 会生成 `script.md`，其中包含文案和关联的镜头证据。缺少证据的段落可对照原片或 `brief` 核实。需要调整旁白时，编辑下面的文件。
 
 ```text
 output/xxx/script.json
 ```
 
-只改 `text`，保存后重新跑同一条命令（同 `--workdir`）：
+修改 `text` 并保存，再指定同一个 `--workdir` 运行。
 
 ```bash
 reachreel run video.mp4 --workdir output/xxx
@@ -610,7 +636,6 @@ reachreel run video.mp4 --workdir output/xxx
 也可以分步做，避免一次跑完整条：
 
 ```bash
-reachreel script   output/xxx   # 重新生成文案
 reachreel tts      output/xxx   # 按新文案重新配音
 reachreel subtitle output/xxx   # 重做字幕
 reachreel mix      output/xxx   # 重做混音
@@ -620,6 +645,12 @@ reachreel licenses output/xxx   # 导出 BGM 授权清单
 reachreel cache info            # 共享缓存位置和大小
 ```
 
+正常续跑会保留人工修改过的文案。`--brief`、`--style-preset` 等写稿输入改变时，带生成记录且未被编辑的文案会重新生成。需要主动替换草稿时，执行 `reachreel script <workdir>`，或在 `run --only` 中显式选择 `script`。执行写稿阶段时，`--force` 和 `--no-resume` 也可能替换已有文案。
+
+如果请求的内容语言与带生成记录的人工改稿不同，续跑会在替换稿件或配音前停下。要切到新生成的英文文案，可显式执行 `reachreel script <workdir> --content-language en`。
+
+配音后可在 `review.md` 中查看实测时长超出关联镜头可用时间的段落。缩短对应句子，再重做配音并检查新的成片。
+
 ### 10.2 只改字幕
 
 编辑 `output/xxx/subtitles.srt`，然后：
@@ -628,7 +659,7 @@ reachreel cache info            # 共享缓存位置和大小
 reachreel render output/xxx
 ```
 
-`render` 会用现有 `mix.wav` 和你的 SRT 重新生成 `subtitles.ass` 并烧字幕，不会重跑 TTS。
+`render` 使用现有的 `mix.wav` 和编辑后的 SRT。硬字幕模式会重新生成 `subtitles.ass`，软字幕模式会更新字幕轨。
 
 ### 10.3 全部重做
 
@@ -636,7 +667,7 @@ reachreel render output/xxx
 reachreel run video.mp4 --workdir output/xxx --force
 ```
 
-会重新抽帧、重新 VLM、重新写稿、重新配音、重新渲染。
+会重新抽帧、分析画面、写稿、配音和渲染。VLM 和 TTS 会跳过工作目录及共享缓存的读取。
 
 ### 10.4 只重做场景/文案，保留 VLM
 
@@ -655,7 +686,37 @@ bgm_volume = 0.15       # 更轻
 ambient_volume = 0.22   # 环境声更明显
 ```
 
-然后重新跑同一条命令（会重新混音和渲染）。
+重新混音时显式传入配置文件，再渲染和检查更新后的成片。
+
+```bash
+reachreel mix output/xxx --config config.toml
+reachreel render output/xxx
+reachreel qa output/xxx
+```
+
+### 10.6 导出到剪辑软件
+
+原片、`narration.wav` 和 `subtitles.srt` 就绪后即可导出。`export` 读取现有工作目录，通过 FFmpeg 在本地生成素材包。
+
+```bash
+reachreel export output/my-job
+reachreel export output/my-job --format mov --out output/my-job-prores
+reachreel export output/my-job --fps 30 --out output/my-job-30fps
+```
+
+默认导出到 `output/my-job/edit`。再次导出时，用 `--out` 指定一个新目录。MP4 使用 H.264 和 AAC。MOV 使用 ProRes 422 和 PCM。两种视频均不压制 ReachReel 字幕，并按工作目录的设置处理输出高度和帧率，生成恒定帧率视频。已有完整混音时，视频带完整混音。尚未混音时，视频带旁白。
+
+剪辑素材包支持整数帧率及标准分数帧率 23.976、29.97、59.94 和 119.88 fps。遇到其他帧率时，可用 `--fps` 指定支持的导出帧率，工作目录中的设置继续用于其他命令。
+
+| 剪辑软件 | 导入方式 |
+|---|---|
+| Premiere Pro、DaVinci Resolve | 导入 `timeline.xml`（Final Cut Pro 7 XML） |
+| Final Cut Pro | 通过「文件 → 导入 → XML」导入 `timeline.fcpxml`（FCPXML 1.9） |
+| 剪映 / CapCut 桌面版 | 导入 `video.mp4`，再通过字幕菜单导入 `subtitles.srt`。如需独立编辑旁白，将视频静音，再把 `narration.wav` 对齐到时间线起点。 |
+
+XML 时间线使用视频画面，并将 `narration.wav` 放在独立轨道上。单独导入 `subtitles.srt` 即可编辑字幕。如果素材包内有 `mix.wav`，可用它替换旁白轨，保留已有的旁白、原声与 BGM 混音。交付时请传整个目录。如果移动了目录，在剪辑软件中重新链接新目录下的视频和旁白文件。
+
+交付前在接收方使用的剪辑软件中验证导入。核对片段时长、帧率、旁白和字幕的对齐，以及移动素材包后能否重新链接素材。
 
 ---
 

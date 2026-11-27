@@ -320,11 +320,13 @@ def extract_frames(
             LOG.info("Dropped %d near-duplicate frames (dedup threshold %.1f)", dropped, dedup)
 
 
-def save_scenes(path: Path, info: VideoInfo, scenes: list[Scene]) -> None:
-    atomic_write_json(
-        path,
-        {"video": asdict(info), "scenes": [s.to_dict() for s in scenes]},
-    )
+def save_scenes(
+    path: Path, info: VideoInfo, scenes: list[Scene], *, inputs_key: str | None = None
+) -> None:
+    data = {"video": asdict(info), "scenes": [s.to_dict() for s in scenes]}
+    if inputs_key is not None:
+        data["inputs_key"] = inputs_key
+    atomic_write_json(path, data)
 
 
 def load_scenes(path: Path) -> tuple[VideoInfo, list[Scene]]:

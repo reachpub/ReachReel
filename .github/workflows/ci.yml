@@ -94,6 +94,24 @@ jobs:
       - name: Unit tests
         run: .venv/bin/python -m unittest discover -s tests -v
 
+      - name: Ensure FFmpeg is available
+        if: matrix.python-version == '3.12'
+        run: |
+          if ! command -v ffmpeg > /dev/null || ! command -v ffprobe > /dev/null; then
+            brew install ffmpeg
+          fi
+          ffmpeg -version
+          ffprobe -version
+
+      - name: Media integration tests
+        if: matrix.python-version == '3.12'
+        env:
+          REACHREEL_INTEGRATION: "1"
+        run: >-
+          .venv/bin/python -m unittest -v
+          tests.integration.test_resume tests.integration.test_scenes
+          tests.integration.test_timeline tests.integration.test_export
+
       - name: Build package
         if: matrix.python-version == '3.12'
         run: uv build

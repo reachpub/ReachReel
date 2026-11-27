@@ -14,7 +14,7 @@
 ## 适合谁用
 
 - **视频创作者 / Vlog 博主**：把相机或手机里的原始素材快速变成可直接发布的口播成片（抖音、小红书、Reels、Shorts、B 站、YouTube），告别对着空白文档写稿和反复对轨。
-- **视频剪辑师**：先生成一版带旁白的粗剪，用 `--review-script` 在配音前审校并修改 `script.md` / `script.json`；后续只改文案、字号或 BGM 时，只需重跑对应阶段，不用整条从头来。
+- **视频剪辑师**：分阶段制作旁白粗剪，配音前可以审稿，后续可单独重做字幕、混音或渲染。
 - **开发者**：一条清晰、可断点复用、本地优先的 Python 流水线（`probe -> vlm -> script -> tts -> subtitles -> mix -> render -> qa`），基于 FFmpeg、Ollama、Kokoro-82M (MLX) 与 `mlx-whisper` 构建。
 
 ---
@@ -23,8 +23,8 @@
 
 ### 看片与写稿
 - **按镜头理解画面**：逐镜头识别地点、人物主体、动作、细节与氛围，按时间顺序写出贴合画面的旁白，而不是空泛套话。
-- **可控的风格与节奏**：通过 `--style` 指定口吻、`--brief` 补充地名与人物背景、`--density` 调节旁白疏密留白。
-- **配音前先审稿**：加上 `--review-script` 会在写完 `script.md` 后暂停，确认或修改文案后再继续配音与渲染。
+- **旁白与节奏**：用 `--brief` 补充背景事实和人物行为，用 `--style` 指定叙述视角、口吻和重点，用 `--density` 调节旁白疏密。[人物解说示例](docs/zh-CN/USER_GUIDE.md#character-focused-narration)
+- **配音前先审稿**：加上 `--review-script` 会暂停供审校。阅读 `script.md`，把修改写入 `script.json`，再执行 `reachreel tts <workdir>`。
 
 ### 语音配音（中文与英文）
 - **中英双语本地配音**：基于 Apple Silicon 的 Kokoro-82M (MLX)，支持普通话（`zh-CN`）、美式英语（`en-US`）与英式英语（`en-GB`），首次下载模型后可完全离线运行。
@@ -111,6 +111,7 @@ final.mp4        # 可直接发布的成片
 subtitles.srt    # 字幕（兼容软字幕）
 subtitles.ass    # 硬字幕布局（按真实输出像素坐标）
 script.json      # 分段解说词（可直接编辑）
+script.md        # 可选的审稿预览，包含镜头证据
 scenes.json      # 镜头切分 + 画面分析
 timeline.json    # 旁白时间轴落点
 narration.wav    # 纯旁白音轨
@@ -130,6 +131,13 @@ reachreel licenses output/<视频名>_<时间戳>
 # 先看计划，再只重跑 VLM + 文案
 reachreel run video.mp4 --workdir output/<视频名>_<时间戳> --only vlm,script --dry-run
 reachreel run video.mp4 --workdir output/<视频名>_<时间戳> --only vlm,script
+```
+
+一键导出剪辑素材包，包含干净画面的 H.264 MP4 或 ProRes 422 MOV、独立 WAV 和 SRT，以及供 Premiere Pro、DaVinci Resolve 和 Final Cut Pro 导入的时间线 XML。剪映和 CapCut 可分别导入素材。详见[使用手册](docs/zh-CN/USER_GUIDE.md)。
+
+```bash
+reachreel export output/my-job
+reachreel export output/my-job --format mov --out output/my-job-prores
 ```
 
 ---
@@ -191,7 +199,7 @@ reachreel/
 - 解说由本地 LLM 生成，**可能过度解读画面**；正式发布前建议过一遍 `script.json`。
 - 字幕按句/行对齐 Whisper 语音边界，暂不支持逐字卡拉 OK 时间轴。
 - BGM 目前从 `inputs/bgm/` 随机选曲，暂不按情绪自动匹配。
-- 仅导出 H.264/AAC，暂不支持 HDR、10-bit、硬件编码或竖屏智能重构图。
+- 发布成片使用 H.264/AAC，剪辑导出也提供 ProRes 422。HDR 工作流、硬件编码和竖屏智能重构图有待实现。
 - 桌面图形界面、批量文件夹监听与剪映/B站/YouTube 发布集成见[路线图](docs/zh-CN/ROADMAP.md)。
 
 ---

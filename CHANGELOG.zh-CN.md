@@ -2,13 +2,34 @@
 
 # 变更记录
 
-## [Unreleased]
+## [0.5.0] - 2026-11-27
+
+> 尚未发布。
 
 ### 新增
 
+- 审稿预览展示关联镜头证据，并标出缺少证据的段落。配音后的审校结果会标出实测时长超出镜头预算的段落。
+- `reachreel export` 一键生成剪辑素材包，支持 H.264 MP4 或 ProRes 422 MOV，并附带独立旁白、SRT 字幕、可选的混音，以及供 Premiere Pro、DaVinci Resolve 和 Final Cut Pro 导入的 XML 时间线。
 - 新增说话风格预设 `style_preset` / `--style-preset`（`oral`、`casual`、`literary`、`documentary`、`commentary`，默认 `oral` 真人口语）、自定义风格覆盖 `style` / `--style`，以及口语润色开关 `script_oral_polish` / `--oral-polish` / `--no-oral-polish`，配合更具体口语化的 VLM 看片提示词（`vf-vlm-3`）减少字幕与台词的书面腔。
 - 基于 `mlx-audio` 接入 `Qwen3TTSEngine`（`tts_engine = "qwen3"` / `--tts qwen3`），支持 `CustomVoice` 预设音色（`Serena`、`Vivian`、`Uncle_Fu`、`Dylan`、`Eric`、`Ryan`、`Aiden`）加自然语言 `tts_instruct` 控制、`VoiceDesign` 音色设计，以及 `Base` 模型零样本声音克隆（`tts_ref_audio` / `tts_ref_text`）。
 - 支持完整的声音与声学参数配置：支持配置文件 `[tts]` 表或顶级 `tts_*` 键、CLI 参数（`--qwen3-model`、`--tts-speed`、`--tts-instruct`、`--tts-ref-audio`、`--tts-ref-text`、`--tts-temperature`、`--tts-top-p`、`--tts-top-k`、`--tts-repetition-penalty`、`--tts-seed`、`--tts-chunk-pause`、`--tts-pitch`、`--tts-volume`）、`script.json` 片段级 `voice`/`instruct`/`speed` 覆盖，以及 Kokoro 逗号混音与 `reachreel voices` 命令。
+
+### 修复
+
+- 分阶段运行会保存工作目录，回显最后一个所选阶段的产物。`analyze` 也会留下可接续的工作目录。阶段命令会报告缺少或过时的前置产物，并提示生成方法。
+- 显式配置、环境变量和命令行参数优先于工作目录中保存的设置。写稿输入改变时，正常续跑会重新生成带生成记录且未被编辑的草稿，并保留已编辑的草稿。
+- VLM 在续跑时重试失败镜头。`--force` 会跳过 VLM 和 TTS 的工作目录缓存与共享缓存读取。
+- 两种渲染命令走同一条流水线，并默认保留保存的字幕模式。
+- 成片输入变化后，QA 会拒绝旧成片。渲染和导出会检查原片与镜头时间轴是否变化。编码失败时会保留上一版成片和 QA 结果。
+- Ollama URL 写入清单前会移除凭据、查询参数和片段。
+- 更换 BGM 目录后，重做混音会重新选曲。独立写稿会用变更后的 VLM 设置重新分析镜头。
+- TTS 缓存以原子方式发布 WAV，缓存音频损坏或截断时会重新合成。
+- 剪辑导出转换帧率时会保留画面时长。不支持的帧率会报错，并提示通过 `export --fps` 覆盖。
+
+## [0.4.0] - 2026-11-23
+
+### 新增
+
 - 支持英文旁白、英文配音与英文字幕（`en-US` 与 `en-GB` 在 `src/reachreel/languages.py` 中升级为 `supported`）。运行 `reachreel run video.mp4 --content-language en`（或 `--tts-language en-GB`）时会自动解析整套英文配置：口播估算语速（`14.5` 字符/秒）、默认 Kokoro 音色（`af_heart` / `bf_emma`）、默认 macOS `say` 音色（`Samantha` / `Daniel`）、Whisper `en` 提示、字幕行宽（`42` 字符）、拉丁字体（`Helvetica Neue`）以及软字幕轨元数据（`language=eng`）。
 - 在 `pyproject.toml` 新增无 torch 的可选依赖 `tts-en`（`spacy`、`num2words`、`espeakng-loader`、`phonemizer-fork`），与 `mlx-audio` 非 transformer 的 `KokoroPipeline`（`trf=False` + `en_core_web_sm` + `EspeakFallback`）一致；同时提供中文语言组 `tts-zh`。
 - `_split_for_tts` 适配英文切段（按句末/从句标点与空格切分，单段上限 250 字符，不再在 70 字符处腰斩单词），`media/subtitles.py` 支持按英文句读切分与双行均衡换行。
@@ -16,15 +37,16 @@
 - 按 `docs/zh-CN/LANGUAGES.md` 第 6 节完成 `en-US` 与 `en-GB` 验证：Whisper 回环 CER 为 0.00%（`af_heart`、`am_michael`、`bf_emma`）和 0.51%（`bm_george`），尼亚加拉瀑布 1080p 英文全流程实跑 QA 20/20 通过（`pass=20 warn=0 fail=0`）。
 - 新增中英双语 MkDocs Material 文档站（`mkdocs.yml`、`scripts/mkdocs_hooks.py`、`pyproject.toml` 中的 `docs` extra），默认英文在站点根路径、简体中文在 `/zh-CN/`，并通过 `.github/workflows/docs.yml` 在构建时从 `README.md` / `README.zh-CN.md` 复制生成 `index.md`、以严格模式构建并部署到 GitHub Pages。
 - `[tool.apdev] pypi_repository = "reachreel"` 让 `apdev release` 使用 `~/.pypirc` 的 `[reachreel]` 段：本项目走自己的 PyPI 账号，其他仓库继续用默认段。需要 `apdev >= 0.2.6`；DEVELOPMENT 里写清了优先级、首次上传决定归属，以及 `TWINE_REPOSITORY` 兜底方式。
-- `pyproject.toml` 补齐 PyPI 页面所需元数据：`Project-URL`（主页、仓库、文档、变更记录、Issues）、11 条 Trove 分类、关键词与作者。`twine check` 对 wheel 与 sdist 均通过；许可证按 PEP 639 渲染（`License-Expression: Apache-2.0` 与 `License-File: LICENSE`/`NOTICE`），构建元数据版本为 2.5。
 
 ### 变更
 
 - `speech_chars_per_second`、`voice`、`say_voice`、`subtitle_max_chars` 与 `subtitle_font` 在 `Settings` 和 `config.example.toml` 中的默认值改为 `0` / 空字符串，表示「跟随解析后的语言档案」（中文默认仍解析为 `3.9`、`zf_xiaoxiao`、`Tingting`、`18`、`PingFang SC`，显式配置始终优先）。
+- PyPI 元数据的作者更新为 `reachpub`，文档链接指向双语文档站。
+- `dev` extra 将最低依赖版本提高到 `apdev[dev]>=0.2.8`。
 
 ### 修复
 
-- `dev` extra 里其实没有列 `pre-commit`，但 `.pre-commit-config.yaml` 和文档都告诉贡献者 `uv pip install -e '.[dev]'` 会带上它。现已重新加入（`pre-commit>=3.5`）。
+- CLI 从已安装包的元数据读取版本号。
 
 ## [0.3.0] - 2026-11-22
 
@@ -50,6 +72,7 @@
 - 时间轴边界单元测试：空列表、无场景、未知场景 id、旁白超长告警、以及片段短于 `tail_padding` 的情况。
 
 - 补打 `v0.1.0`（`b8a60ae`）与 `v0.2.0`（`c9c3652`）两个 tag，并各建一个 GitHub release，附上从对应提交构建的 wheel 与 sdist。两者都标注为 retroactive，因为当时既没打 tag 也没对外发布过。
+- `pyproject.toml` 补齐 PyPI 页面所需元数据：`Project-URL`（主页、仓库、文档、变更记录、Issues）、11 条 Trove 分类、关键词与作者。`twine check` 对 wheel 与 sdist 均通过；许可证按 PEP 639 渲染（`License-Expression: Apache-2.0` 与 `License-File: LICENSE`/`NOTICE`），构建元数据版本为 2.5。
 
 ### 变更
 
@@ -64,6 +87,7 @@
 
 - CI 改用 `macos-15`：`macos-14` 标签已下线，排队任务会报错 “The configuration 'macos-14-arm64-us-xl' is not supported”。
 - `render --crf` 之前只是被解析、从未生效；现在和 `--height` / `--fps` 一样写入 `Settings.crf`，并有测试断言 manifest 的 `render_settings` 会被复用、同时 CLI 参数优先。
+- `dev` extra 里其实没有列 `pre-commit`，但 `.pre-commit-config.yaml` 和文档都告诉贡献者 `uv pip install -e '.[dev]'` 会带上它。现已重新加入（`pre-commit>=3.5`）。
 
 ## [0.2.0] - 2026-11-22
 

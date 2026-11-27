@@ -18,8 +18,8 @@ Already working reliably:
 
 - local scene detection + frame extraction;
 - per-scene visual understanding with an Ollama VLM;
-- Chinese narration written by a local LLM;
-- Kokoro Chinese voiceover;
+- Chinese and English narration written by a local LLM;
+- Chinese and English voiceover with Kokoro and Qwen3-TTS;
 - mlx-whisper speech boundaries + script-based subtitles;
 - sidechain ducking between BGM / ambient audio / narration;
 - burned-in / soft subtitles;
@@ -37,14 +37,14 @@ Validated on two real clips:
 
 ## 0.1 Recently completed
 
-- **P0-2 stage commands (done)**: `script` / `tts` / `subtitle` / `mix` / `render` / `qa`; the full `script → tts → subtitle → mix → render → qa` chain has been exercised on 6s footage; `run --only vlm,script` and `run --dry-run` are available.
+- **P0-2 stage commands (done)**. `run --only vlm,script` saves the work directory and reports `script.json`, so the dedicated `tts` command can resume it. Explicit config keys and flags override saved settings.
 - **P0-5 QA gate (done)**: `reachreel qa`, writes `qa.json`; `run` executes it automatically by default; `--strict` makes warnings fail too. Added subtitle pixel overflow, narration/subtitle per-sentence deviation, `astats` clipping checks, `[qa]` threshold configuration, and tuning for static long-shot freeze false positives.
 - **Subtitle layout (done)**: burned-in subtitles now use `subtitles.ass`, `PlayRes` equals the output resolution, and `subtitle_size` / margins are real pixels; the portrait overflow issue is fixed.
 - **P0-1 rotation metadata (done)**: display vs coded dimensions and rotation tests.
 - **P0-3 retries and quality flags (done)**: VLM/LLM/TTS/Whisper retry or fall back; degradations land in `manifest.quality_flags`.
 - **P0-8 BGM metadata (done)**: `inputs/bgm/manifest.json`, `manifest.bgm_metadata`, and `reachreel licenses`.
 - **P0-4 subtitle safe areas (done)**: platform presets, punctuation/word-aware splitting, pause-weighted timing, hard line limits.
-- **P0-7 cross-workdir cache (done)**: video-fingerprint VLM cache, content-keyed TTS audio, `cache info` / `cache clean`.
+- **P0-7 cross-workdir cache (done)**. VLM retries failed scenes on resume and `--force` bypasses local and shared cache reads. TTS caches successful audio by content.
 - **P0-9 macOS slice (done)**: UTF-8 subprocesses, `platformdirs` cache, `doctor --json`, and a Chinese/space-path integration smoke.
 - **P1-3 review gate (done)**: `--review-script` writes `script.md` and stops before TTS.
 - **P1-4 audio (done)**: two-pass `loudnorm` with single-pass fallback and BGM fade-out.
@@ -131,14 +131,14 @@ Implemented:
 - QA SRT parsing/exit code tests, plus QA threshold, astats parsing, subtitle margin, per-sentence alignment, and `--only` parsing tests;
 - `run --only` reuse smoke: `tests/integration/test_smoke.py::OnlyReuseTest` hashes `scenes.json` / `narration.wav` / `subtitles.srt` and proves `--only tts`, `--only mix,render`, and `--only qa` do not redo earlier stages;
 - no audio track / mono / 5.1 at probe level (`probe_video` reports 0 / 1 / 6 channels) and rotation end to end (90° / 180° / 270° clips written with `-display_rotation`, asserting coded vs display size);
-- GitHub Actions: `macos-15` runner + lint + unit tests (no large models).
+- GitHub Actions runs lint, unit tests, and model-free integration fixtures covering resume, scenes, timeline, and editing export on macOS.
 
-**Acceptance**: PRs must pass lint + unit tests; core paths have regression tests; integration fixtures run locally with `REACHREEL_INTEGRATION=1`.
+**Acceptance**. PR checks include lint, unit tests, and the selected media integration tests. Use `REACHREEL_INTEGRATION=1` to run the full integration suite locally.
 
 ### P0-7 Cache keys and cross-workdir reuse (done)
 
-- VLM results are keyed by a sampled video fingerprint plus model, prompt version, language, frame width, and brief.
-- TTS audio is keyed by engine, model, voice, speed, and text.
+- The shared VLM cache uses the video fingerprint, analysis settings, and scene frame contents to identify reusable results.
+- TTS audio is keyed by text and active synthesis settings.
 - The optional shared root defaults to the platform cache dir; `cache_dir` overrides it.
 - Workdir caches remain the primary visible artifacts, and the shared cache is merged into them.
 - `reachreel cache info` and `cache clean --yes` inspect and remove the shared cache.
@@ -189,12 +189,12 @@ See [LOCALIZATION.md §4](LOCALIZATION.md) (split table / migration steps / bann
 
 ### P1-1 TTS upgrade
 
-- add Qwen3-TTS, IndexTTS2, Ming-3.0 TTS;
+- Done. Qwen3-TTS, including `CustomVoice`, `VoiceDesign`, and optional reference-audio cloning with authorized samples.
+- Done. `script.json` supports per-segment `voice`, `instruct`, and `speed` controls.
+- Add IndexTTS2 and Ming-3.0 TTS.
 - voice preview/selection;
 - pronunciation dictionary for polyphonic characters/proper nouns;
-- emotion/speed control per paragraph;
 - more natural pauses at sentence ends;
-- optional voice cloning (requires explicit authorization).
 
 **Goal**: Chinese naturalness clearly better than Kokoro, close to commercial narration.
 
@@ -211,12 +211,13 @@ See [LOCALIZATION.md §4](LOCALIZATION.md) (split table / migration steps / bann
 
 ### P1-3 Script quality
 
-- Done: human review gate (`--review-script` writes `script.md` and stops before voiceover);
-- fact constraints: every sentence must be traceable to VLM evidence from a `scene_id`;
+- Done. `--review-script` writes `script.md` with linked scene evidence and flags missing evidence before voiceover.
+- Done. Narration presets include `oral`, `casual`, `literary`, `documentary`, and `commentary`.
+- Done. `review.md` flags measured voiceover segments that exceed their linked scene budgets.
+- Check factual claims against individual pieces of scene evidence or facts supplied in `brief`.
 - proper-noun whitelist (from `brief`);
-- style presets: Vlog / documentary / commentary / healing / suspense;
 - first-3-second hook;
-- paragraph duration budget: derive character counts from actual TTS duration instead of only the target character count;
+- use measured TTS duration to improve the initial script length budget;
 - first-3-second hook quality metrics.
 
 ### P1-4 Audio quality
@@ -302,9 +303,10 @@ Do not use Gradio/Streamlit, and do not build a timeline editor.
 ### P2-5 Publishing integration
 
 - export to Jianying/CapCut drafts;
-- export to Premiere/FCPXML;
 - publish directly to YouTube/Bilibili/Douyin (requires user authorization);
 - generate titles/descriptions/tags.
+
+`reachreel export` provides editing bundles with Premiere Pro / DaVinci Resolve XML and FCPXML timelines, plus separate media and caption files for Jianying and CapCut.
 
 ---
 
@@ -363,7 +365,7 @@ If you want to contribute, the most welcome areas are:
 
 1. **Testing**: regression tests for scene detection, subtitles, timeline, and mixing;
 2. **Subtitles**: line breaking, safe areas, per-character highlighting;
-3. **TTS providers**: Qwen3-TTS / IndexTTS2 / Piper;
+3. **TTS providers**: IndexTTS2 / Piper;
 4. **VLM representative frames**: motion/change-based frame selection;
 5. **QA**: black frames, freezes, clipping, overflow;
 6. **Docs**: tuning case studies from more real footage.

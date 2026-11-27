@@ -8,6 +8,7 @@ import shutil
 import time
 import wave
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from ..core.config import Settings
@@ -609,7 +610,37 @@ class SayEngine:
 
 def _wav_duration(path: Path) -> float:
     with wave.open(str(path), "rb") as fh:
-        return fh.getnframes() / float(fh.getframerate())
+        frames = fh.getnframes()
+        rate = fh.getframerate()
+        if frames <= 0 or rate <= 0 or fh.getsampwidth() != 2:
+            raise wave.Error("Expected non-empty 16-bit PCM audio")
+        # The header can advertise frames that were never written. Check the
+        # last frame without reading the entire recording into memory.
+        fh.setpos(frames - 1)
+        if len(fh.readframes(1)) != 2 * fh.getnchannels():
+            raise wave.Error("WAV audio data is truncated")
+        return frames / float(rate)
+
+
+def _copy_wav(source: Path, destination: Path) -> float:
+    """Publish a complete, validated WAV with a rename on the destination filesystem."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".tts-cache-", dir=destination.parent) as tmp:
+        staged = Path(tmp) / destination.name
+        shutil.copy2(source, staged)
+        duration = _wav_duration(staged)
+        staged.replace(destination)
+    return duration
+
+
+def _cached_wav_duration(path: Path, *, copy_to: Path | None = None) -> float | None:
+    try:
+        return _wav_duration(path) if copy_to is None else _copy_wav(path, copy_to)
+    except FileNotFoundError:
+        return None
+    except (OSError, EOFError, wave.Error) as exc:
+        LOG.warning("Ignoring unusable TTS cache entry %s: %s", path, exc)
+        return None
 
 
 def make_engine(settings: Settings):
@@ -622,11 +653,6 @@ def make_engine(settings: Settings):
     raise RuntimeError(
         f"Unknown TTS engine: {settings.tts_engine} (choose kokoro, qwen3, or say)"
     )
-
-
-def _cleanup_partial(out_wav: Path) -> None:
-    for candidate in (out_wav, out_wav.with_suffix(".raw.wav"), out_wav.with_suffix(".aiff")):
-        candidate.unlink(missing_ok=True)
 
 
 def tts_cache_key(
@@ -761,43 +787,34 @@ def synthesize_segments(
         )
         out = audio_dir / f"seg_{index:03d}_{key}.wav"
         shared = shared_dir / f"{key}.wav" if shared_dir is not None else None
-        if out.exists() and not force and out.stat().st_size > 1000:
-            segment.audio_path = str(out)
-            segment.duration = _wav_duration(out)
-            segment.tts_speed = seg_speed
-            LOG.info("  [%d/%d] TTS cache hit: %.2fs", index, len(segments), segment.duration)
-            continue
-        if shared is not None and shared.exists() and shared.stat().st_size > 1000:
-            try:
-                out.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(shared, out)
-            except OSError as exc:
-                LOG.warning("Could not read the shared TTS cache %s: %s", shared, exc)
-            else:
+        if not force:
+            duration = _cached_wav_duration(out)
+            cache_name = "cache"
+            if duration is None and shared is not None:
+                duration = _cached_wav_duration(shared, copy_to=out)
+                cache_name = "shared-cache"
+            if duration is not None:
                 segment.audio_path = str(out)
-                segment.duration = _wav_duration(out)
+                segment.duration = duration
                 segment.tts_speed = seg_speed
-                LOG.info(
-                    "  [%d/%d] TTS shared-cache hit: %.2fs",
-                    index,
-                    len(segments),
-                    segment.duration,
-                )
+                LOG.info("  [%d/%d] TTS %s hit: %.2fs", index, len(segments), cache_name, duration)
                 continue
         LOG.info("  [%d/%d] Synthesizing: %s", index, len(segments), segment.text[:30])
         try:
-            duration = _synthesize_with_retries(
-                engine,
-                segment,
-                out,
-                speed=seg_speed,
-                voice=seg_voice or None,
-                instruct=seg_instruct,
-                retries=retries,
-            )
+            with TemporaryDirectory(prefix=".tts-", dir=audio_dir) as tmp:
+                staged = Path(tmp) / out.name
+                duration = _synthesize_with_retries(
+                    engine,
+                    segment,
+                    staged,
+                    speed=seg_speed,
+                    voice=seg_voice or None,
+                    instruct=seg_instruct,
+                    retries=retries,
+                )
+                staged.replace(out)
         except Exception as exc:  # noqa: BLE001 - isolate per-segment failures
             failed += 1
-            _cleanup_partial(out)
             segment.audio_path = ""
             segment.duration = 0.0
             flags.append(
@@ -823,9 +840,8 @@ def synthesize_segments(
         segment.tts_speed = seg_speed
         if shared is not None:
             try:
-                shared.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(out, shared)
-            except OSError as exc:
+                _copy_wav(out, shared)
+            except (OSError, EOFError, wave.Error) as exc:
                 LOG.warning("Could not update the shared TTS cache %s: %s", shared, exc)
         LOG.info("         done in %.2fs", duration)
 

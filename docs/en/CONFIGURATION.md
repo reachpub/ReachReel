@@ -13,16 +13,19 @@ cp config.example.toml config.toml
 reachreel run video.mp4 --config config.toml
 ```
 
-When `--config` is not specified, built-in defaults are used. A `config.toml` in the project is not read automatically; you must pass it explicitly.
+Pass `--config` to load a `config.toml` file. Without it, a new job starts from built-in defaults. An existing job also uses the settings saved in its work directory.
 
 ### Precedence
 
 From lowest to highest:
 
-1. Built-in defaults in code;
-2. `config.toml`;
-3. Environment variables (`REACHREEL_*`);
-4. Command-line options.
+1. Built-in defaults.
+2. Saved work directory settings, when present.
+3. Keys explicitly set in the file passed with `--config`.
+4. Environment variables (`REACHREEL_*`).
+5. Command-line options.
+
+The work directory snapshot saves the Ollama host, port, and proxy path. URL user information, query parameters, and fragments must be supplied again through explicit runtime configuration if needed.
 
 ### Path resolution
 
@@ -223,7 +226,7 @@ subtitle_outline = 0.0        # 0 = auto, about 6% of subtitle_size (outline mod
 subtitle_box_padding = 0.0    # 0 = auto, about 6.7 px at 1920 height (box mode)
 ```
 
-`subtitle_render = "box"` restores the older translucent black box; its padding scales with the output height (about 6.7 px at 1920) unless `subtitle_box_padding` is set. `subtitle_render = "none"` draws plain white text: use it only when the footage is dark enough everywhere the subtitles land. Existing work directories keep whatever they recorded in `manifest.json` → `render_settings`; pass `--subtitle-render box` on `render` to reproduce an old render:
+`subtitle_render = "box"` restores the older translucent black box; its padding scales with the output height (about 6.7 px at 1920) unless `subtitle_box_padding` is set. `subtitle_render = "none"` draws plain white text: use it only when the footage is dark enough everywhere the subtitles land. Existing work directories use their saved settings. Pass `--subtitle-render box` on `render` to reproduce the old appearance:
 
 Portrait recommendations:
 
@@ -298,7 +301,7 @@ ambient_duck_db = -8.0
 | `cache_enabled` | `true` | Reuse VLM analysis and TTS audio across work directories |
 | `cache_dir` | `""` | Shared cache root; empty means the platform cache dir (`~/Library/Caches/reachreel` on macOS, legacy `~/.cache/reachreel` reused if present) |
 
-The shared cache stores VLM results keyed by a sampled video fingerprint and TTS audio keyed by text/model/voice. Disable it with `cache_enabled = false`, `REACHREEL_CACHE=0`, or the global `--no-cache` flag. Manage it with:
+The shared cache reuses successful VLM results for matching video, frames, and analysis settings. It reuses complete TTS WAV files for matching text and synthesis settings. Invalid or truncated WAV files are ignored. Disable the shared cache with `cache_enabled = false`, `REACHREEL_CACHE=0`, or the global `--no-cache` flag.
 
 ```bash
 reachreel cache info

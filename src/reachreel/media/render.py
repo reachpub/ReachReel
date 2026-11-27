@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from ..core.config import Settings
 from ..core.util import ffmpeg_full, run
@@ -86,12 +87,37 @@ def render(
     settings: Settings,
     burn: bool = True,
 ) -> bool:
-    """Render final.mp4. Returns True if subtitles were burned in."""
+    """Publish the render only after encoding succeeds."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=out.parent, prefix=".reachreel-render-") as directory:
+        staging = Path(directory)
+        movie = staging / out.name
+        generated_ass = staging / "subtitles.ass"
+        burned = _render(
+            video=video, audio=audio, subtitles=subtitles, out=movie, settings=settings,
+            burn=burn, generated_ass=generated_ass,
+        )
+        if generated_ass.is_file():
+            generated_ass.replace(subtitles.with_suffix(".ass"))
+        movie.replace(out)
+    LOG.info("Rendered output: %s", out.name)
+    return burned
+
+
+def _render(
+    *,
+    video: Path,
+    audio: Path,
+    subtitles: Path,
+    out: Path,
+    settings: Settings,
+    burn: bool,
+    generated_ass: Path,
+) -> bool:
     from ..core.util import ffprobe_duration
 
     if not video.exists():
         raise RuntimeError(f"Source video not found: {video}")
-    out.parent.mkdir(parents=True, exist_ok=True)
     duration = ffprobe_duration(audio)
     ffmpeg = ffmpeg_full() if burn else "ffmpeg"
     burned = bool(burn and ffmpeg and "subtitles" in _filters(ffmpeg))
@@ -117,17 +143,17 @@ def render(
                 "subtitle_size=%d is interpreted as output pixels and may be too small; try 40-60",
                 settings.subtitle_size,
             )
-        ass_path = subtitles.with_suffix(".ass")
         if subtitles.suffix.lower() == ".srt":
             # Always rebuild the ASS overlay so CLI overrides (e.g. --subtitle-size)
             # take effect even when an old ASS file exists.
             write_ass_from_srt(
                 subtitles,
-                ass_path,
+                generated_ass,
                 width=out_width,
                 height=out_height,
                 settings=settings,
             )
+            ass_path = generated_ass
         else:
             ass_path = subtitles
         LOG.info("Hard subtitle layout: %s (%dx%d)", ass_path.name, out_width, out_height)
@@ -224,8 +250,7 @@ def render(
         if vf_parts:
             cmd[cmd.index("-map"):cmd.index("-map")] = ["-vf", ",".join(vf_parts)]
 
-    LOG.info("Rendered output: %s", out.name)
-    run(cmd)
+    run(cmd, timeout=3600)
     return burned
 
 

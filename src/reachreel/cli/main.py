@@ -10,7 +10,7 @@ from .. import __version__
 from ..core.config import STYLE_PRESETS, Settings
 from ..core.util import read_json, setup_logging
 from ..i18n import negotiate_language, set_language, supported_languages, t
-from ..pipeline.orchestrator import Pipeline, doctor
+from ..pipeline.orchestrator import EDIT_FORMATS, MANIFEST_SCHEMA_VERSION, Pipeline, doctor
 
 
 def _scan_option(argv: list[str], name: str) -> str | None:
@@ -72,7 +72,7 @@ def _overrides(args: argparse.Namespace) -> dict:
         "bgm_dir": getattr(args, "bgm_dir", None),
         "bgm_fade_seconds": getattr(args, "bgm_fade", None),
         "work_root": getattr(args, "out", None),
-        "burn_subtitles": not getattr(args, "no_burn", False),
+        "burn_subtitles": False if getattr(args, "no_burn", False) else None,
         "cache_dir": getattr(args, "cache_dir", None),
         "cache_enabled": False if getattr(args, "no_cache", None) else None,
     }
@@ -90,44 +90,46 @@ def _workdir_context(
 ) -> tuple[Path, Settings, dict]:
     workdir = workdir.resolve()
     manifest = read_json(workdir / "manifest.json", {}) or {}
-    video = Path(manifest.get("video", {}).get("path", ""))
-    if not video.exists():
+    source = manifest
+    if not manifest:
+        # Older analysis-only jobs saved their source in scenes.json.
+        source = read_json(workdir / "scenes.json", {}) or {}
+    video = Path(source.get("video", {}).get("path", ""))
+    if not video.is_file():
         parser.error(t("error.workdir_no_video", workdir=workdir))
 
     config = Path(args.config) if getattr(args, "config", None) else None
-    settings = Settings.load(config)
-
-    # Reuse the full settings snapshot when available; fall back to the old partial fields.
-    for key, value in (manifest.get("settings_snapshot") or {}).items():
-        if hasattr(settings, key) and value is not None:
-            setattr(settings, key, value)
-    for key in ("vlm_model", "llm_model", "tts_engine", "voice", "whisper_model"):
-        value = manifest.get("settings", {}).get(key)
-        if value is not None:
-            setattr(settings, key, value)
-    for key, value in (manifest.get("render_settings") or {}).items():
-        if hasattr(settings, key) and value is not None:
-            setattr(settings, key, value)
-
-    # CLI wins over config/manifest; env is applied by Settings.load before this point.
-    overrides = _overrides(args)
-    prev_engine = settings.tts_engine
-    for key, value in overrides.items():
-        if value is not None and hasattr(settings, key):
-            setattr(settings, key, value)
-    # Switching engine or enabling reference-audio cloning without an explicit
-    # --voice must not carry over a stale voice from the previous engine.
-    if overrides.get("voice") is None and (
-        (overrides.get("tts_engine") is not None and settings.tts_engine != prev_engine)
-        or (overrides.get("tts_ref_audio") and settings.tts_engine == "qwen3")
-    ):
-        settings.voice = ""
-    # Explicitly choosing --style-preset without --style clears any old custom
-    # style stored in manifest.json so the requested preset takes effect.
-    if overrides.get("style_preset") is not None and overrides.get("style") is None:
-        settings.style = ""
-
+    old_settings = manifest.get("settings") or {}
+    snapshot = manifest.get("settings_snapshot") or {}
+    render_settings = manifest.get("render_settings") or {}
+    modern = manifest.get("schema_version") == MANIFEST_SCHEMA_VERSION
+    saved = {**render_settings, **snapshot} if modern else {**snapshot, **render_settings}
+    inherited = {
+        **{key: old_settings.get(key) for key in (
+            "vlm_model", "llm_model", "tts_engine", "voice", "whisper_model"
+        )},
+        **saved,
+    }
+    # The render record stores resolved defaults for QA. Keep automatic values
+    # automatic when a new language is selected.
+    for key in ("subtitle_font", "subtitle_max_chars"):
+        if key in snapshot and not snapshot[key]:
+            inherited[key] = snapshot[key]
+    settings = Settings.load(config, _overrides(args), inherited=inherited)
     return video, settings, manifest
+
+
+def _source_context(args: argparse.Namespace, parser: argparse.ArgumentParser) -> tuple[Settings, dict]:
+    if not args.video.is_file():
+        parser.error(t("error.video_not_found", video=args.video))
+    if args.workdir and any(
+        (args.workdir / name).is_file() for name in ("manifest.json", "scenes.json")
+    ):
+        video, settings, manifest = _workdir_context(args.workdir, args, parser)
+        if video.resolve() != args.video.resolve():
+            parser.error(t("error.workdir_other_video", video=video, current=args.video))
+        return settings, manifest
+    return _settings(args), {}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -408,6 +410,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=t("cli.render_margin_right"),
     )
 
+    export = sub.add_parser("export", help=t("cli.export"))
+    export.add_argument("workdir", type=Path)
+    export.add_argument("--format", choices=EDIT_FORMATS, default="mp4", help=t("cli.export_format"))
+    export.add_argument("--fps", type=float, help=t("cli.export_fps"))
+    export.add_argument("--out", type=Path, help=t("cli.export_out"))
+
     qa = sub.add_parser("qa", help=t("cli.qa"))
     qa.add_argument("workdir", type=Path)
     qa.add_argument("--config", default=None, help=t("cli.qa_config"))
@@ -516,8 +524,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "run":
-        if not args.video.exists():
-            parser.error(t("error.video_not_found", video=args.video))
+        settings, manifest = _source_context(args, parser)
         from ..pipeline.orchestrator import parse_only
 
         try:
@@ -526,27 +533,8 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
         if args.review_script and only is not None and "script" not in only:
             parser.error(t("error.review_script_needs_script"))
-        video = args.video
-        manifest: dict = {}
-        # Reuse the settings snapshot when running into an existing workdir,
-        # so `run --only ...` behaves like the stage commands.
-        if args.workdir and (assumed := read_json(args.workdir / "manifest.json", {})):
-            if assumed.get("video", {}).get("path"):
-                video, settings, manifest = _workdir_context(args.workdir, args, parser)
-                if video.resolve() != args.video.resolve():
-                    parser.error(
-                        t(
-                            "error.workdir_other_video",
-                            video=video,
-                            current=args.video,
-                        )
-                    )
-            else:
-                settings = _settings(args)
-        else:
-            settings = _settings(args)
         pipeline = Pipeline(
-            video,
+            args.video,
             settings,
             workdir=args.workdir,
             resume=not args.no_resume,
@@ -556,17 +544,20 @@ def main(argv: list[str] | None = None) -> int:
         bgm_source = manifest.get("bgm_source") or manifest.get("settings", {}).get("bgm")
         if bgm_source:
             pipeline.bgm_source = Path(bgm_source)
-        out = pipeline.run(
-            asr_engine=args.asr,
-            bgm_file=Path(args.bgm).expanduser() if args.bgm else None,
-            no_bgm=args.no_bgm,
-            burn=not args.no_burn,
-            qa=not args.no_qa,
-            qa_strict=args.qa_strict,
-            only=only,
-            dry_run=args.dry_run,
-            review_script=args.review_script,
-        )
+        try:
+            out = pipeline.run(
+                asr_engine=args.asr,
+                bgm_file=Path(args.bgm).expanduser() if args.bgm else None,
+                no_bgm=args.no_bgm,
+                burn=settings.burn_subtitles,
+                qa=not args.no_qa,
+                qa_strict=args.qa_strict,
+                only=only,
+                dry_run=args.dry_run,
+                review_script=args.review_script,
+            )
+        except RuntimeError as exc:
+            parser.exit(1, f"{parser.prog}: {exc}\n")
         if args.dry_run:
             return 0
         print(out)
@@ -575,84 +566,60 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "analyze":
-        if not args.video.exists():
-            parser.error(t("error.video_not_found", video=args.video))
-        settings = _settings(args)
+        settings, _ = _source_context(args, parser)
         pipeline = Pipeline(args.video, settings, workdir=args.workdir, force=args.force)
-        pipeline.prepare_scenes()
-        pipeline.understand()
+        try:
+            pipeline.stage_analyze()
+        except RuntimeError as exc:
+            parser.exit(1, f"{parser.prog}: {exc}\n")
         print(pipeline.scenes_path)
         return 0
 
-    if args.command in {"script", "tts", "subtitle", "mix"}:
+    if args.command in {"script", "tts", "subtitle", "mix", "render"}:
         video, settings, manifest = _workdir_context(args.workdir, args, parser)
         pipeline = Pipeline(video, settings, workdir=args.workdir, resume=True, force=False)
         bgm_source = manifest.get("bgm_source") or manifest.get("settings", {}).get("bgm")
         pipeline.bgm_source = Path(bgm_source) if bgm_source else None
 
-        if args.command == "script":
-            pipeline.stage_script()
-            print(pipeline.script_path)
-        elif args.command == "tts":
-            pipeline.stage_tts()
-            print(pipeline.timeline_path)
-        elif args.command == "subtitle":
-            pipeline.stage_subtitle(asr_engine=args.asr)
-            print(pipeline.subtitles_path)
-        else:
-            pipeline.stage_mix(
-                bgm_file=Path(args.bgm).expanduser() if args.bgm else None,
-                no_bgm=args.no_bgm,
-            )
-            print(pipeline.mix_path)
+        try:
+            if args.command == "script":
+                pipeline.stage_script(refresh_analysis=any(
+                    getattr(args, option) is not None for option in (
+                        "ollama_url", "vlm_model", "vlm_workers", "vlm_frames",
+                        "vlm_dedup", "scene_threshold",
+                    )
+                ))
+                print(pipeline.script_path)
+            elif args.command == "tts":
+                pipeline.stage_tts()
+                print(pipeline.timeline_path)
+            elif args.command == "subtitle":
+                pipeline.stage_subtitle(asr_engine=args.asr)
+                print(pipeline.subtitles_path)
+            elif args.command == "mix":
+                pipeline.stage_mix(
+                    bgm_file=Path(args.bgm).expanduser() if args.bgm else None,
+                    no_bgm=args.no_bgm,
+                )
+                print(pipeline.mix_path)
+            else:
+                out = pipeline.run(only="render", burn=settings.burn_subtitles)
+                print(f"{out} (burned={pipeline.burned_subtitles})")
+        except RuntimeError as exc:
+            parser.exit(1, f"{parser.prog}: {exc}\n")
         return 0
 
-    if args.command == "render":
-        workdir = args.workdir.resolve()
-        for name in ("mix.wav", "subtitles.srt"):
-            if not (workdir / name).exists():
-                parser.error(t("error.missing_artifact", name=name))
-        video, settings, _manifest = _workdir_context(workdir, args, parser)
-        from ..media.render import render
-
-        if args.height is not None:
-            settings.output_height = args.height
-        if args.fps is not None:
-            settings.output_fps = args.fps
-        if args.crf is not None:
-            settings.crf = args.crf
-        out = workdir / "final.mp4"
-        burned = render(
-            video=video,
-            audio=workdir / "mix.wav",
-            subtitles=workdir / "subtitles.srt",
-            out=out,
-            settings=settings,
-            burn=not args.no_burn,
-        )
-        # Keep QA / downstream tooling in sync with the actual render settings.
-        from ..core.util import atomic_write_json
-
-        manifest = read_json(workdir / "manifest.json", {}) or {}
-        manifest.setdefault("settings", {})["burned_subtitles"] = burned
-        manifest.setdefault("render_settings", {}).update(
-            {
-                "output_height": settings.output_height,
-                "output_fps": settings.output_fps,
-                "crf": settings.crf,
-                "subtitle_font": settings.resolved_subtitle_font(),
-                "subtitle_size": settings.subtitle_size,
-                "subtitle_preset": settings.subtitle_preset,
-                "subtitle_margin_v": settings.subtitle_margin_v,
-                "subtitle_margin_left": settings.subtitle_margin_left,
-                "subtitle_margin_right": settings.subtitle_margin_right,
-                "subtitle_max_chars": settings.resolved_subtitle_max_chars(),
-                "subtitle_size_unit": "px",
-                "subtitle_layout": "ass",
-            }
-        )
-        atomic_write_json(workdir / "manifest.json", manifest)
-        print(f"{out} (burned={burned})")
+    if args.command == "export":
+        workdir = args.workdir.expanduser().resolve()
+        if not (workdir / "manifest.json").resolve().is_relative_to(workdir):
+            parser.error(t("error.export_artifact_escape", name="manifest.json"))
+        video, settings, _ = _workdir_context(workdir, args, parser)
+        pipeline = Pipeline(video, settings, workdir=workdir, create_dir=False)
+        try:
+            out = pipeline.export_edit(destination=args.out, video_format=args.format)
+        except (OSError, RuntimeError, ValueError) as exc:
+            parser.error(str(exc))
+        print(out)
         return 0
 
     if args.command == "cache":
@@ -712,13 +679,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "qa":
         from ..pipeline.qa import attach_to_manifest, print_report, run_qa
 
+        workdir = args.workdir.resolve()
         overrides = None
         if args.config:
-            from ..core.config import settings_to_dict
-
-            overrides = settings_to_dict(Settings.load(Path(args.config)))
-        report = run_qa(args.workdir.resolve(), strict=args.strict, settings_override=overrides)
-        attach_to_manifest(args.workdir.resolve(), report)
+            manifest = read_json(workdir / "manifest.json", {}) or {}
+            overrides = Settings.load(
+                Path(args.config), inherited=manifest.get("settings_snapshot")
+            ).qa_values()
+        report = run_qa(workdir, strict=args.strict, settings_override=overrides)
+        attach_to_manifest(workdir, report)
         if args.json:
             print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
         else:

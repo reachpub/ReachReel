@@ -6,6 +6,7 @@ import tomllib
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from ..i18n import normalize_language
 from ..languages import (
@@ -160,7 +161,14 @@ class Settings:
     bgm_root_resolved: Path | None = field(default=None, repr=False)
 
     @classmethod
-    def load(cls, path: Path | None = None, overrides: dict[str, Any] | None = None) -> Settings:
+    def load(
+        cls,
+        path: Path | None = None,
+        overrides: dict[str, Any] | None = None,
+        *,
+        inherited: dict[str, Any] | None = None,
+    ) -> Settings:
+        """Load defaults, saved job settings, explicit config, environment, and CLI in order."""
         data: dict[str, Any] = {}
         base: Path | None = None
         if path and path.exists():
@@ -175,6 +183,7 @@ class Settings:
                     data[key] = str(value)
         settings = cls()
         valid = {f.name for f in fields(cls)}
+        configured: dict[str, Any] = {}
         tts_aliases = {
             "engine": "tts_engine",
             "language": "tts_language",
@@ -202,7 +211,7 @@ class Settings:
                 for sub_key, sub_value in value.items():
                     attr = f"qa_{sub_key}"
                     if attr in valid and sub_value is not None:
-                        setattr(settings, attr, sub_value)
+                        configured[attr] = sub_value
             elif key == "tts" and isinstance(value, dict):
                 # Optional [tts] table alias: speed -> tts_speed, etc.
                 for sub_key, sub_value in value.items():
@@ -213,12 +222,31 @@ class Settings:
                             if not ref_path.is_absolute():
                                 ref_path = base / ref_path
                             sub_value = str(ref_path)
-                        setattr(settings, attr, sub_value)
+                        configured[attr] = sub_value
             elif key in valid and value is not None:
+                configured[key] = value
+        for key, value in (inherited or {}).items():
+            if key == "ollama_url":
+                value = public_ollama_url(value)
+            if key in valid and value is not None:
                 setattr(settings, key, value)
-        settings._apply_env()
-        for key, value in (overrides or {}).items():
-            if value is not None and key in valid:
+        cli = {
+            key: value for key, value in (overrides or {}).items()
+            if key in valid and value is not None
+        }
+        for layer in (configured, cls._environment_values(), cli):
+            # A new selector resets its dependent override from lower-priority layers.
+            current_engine = str(settings.tts_engine or "kokoro").strip().lower()
+            engine = str(layer.get("tts_engine", current_engine) or "kokoro").strip().lower()
+            if "voice" not in layer and (
+                engine != current_engine or (engine == "qwen3" and layer.get("tts_ref_audio"))
+            ):
+                settings.voice = ""
+            if "style_preset" in layer and "style" not in layer:
+                settings.style = ""
+            if "bgm_dir" in layer and "bgm_file" not in layer:
+                settings.bgm_file = ""
+            for key, value in layer.items():
                 setattr(settings, key, value)
         settings.ui_language = normalize_language(settings.ui_language)
         settings.content_language = normalize_content_language(settings.content_language)
@@ -232,7 +260,8 @@ class Settings:
         settings.bgm_root_resolved = Path(settings.bgm_dir).expanduser()
         return settings
 
-    def _apply_env(self) -> None:
+    @staticmethod
+    def _environment_values() -> dict[str, Any]:
         mapping = {
             "REACHREEL_LANG": "ui_language",
             "REACHREEL_CONTENT_LANGUAGE": "content_language",
@@ -247,16 +276,20 @@ class Settings:
             "REACHREEL_QWEN3_MODEL": "qwen3_model",
             "REACHREEL_CACHE_DIR": "cache_dir",
         }
-        for env_name, attr in mapping.items():
-            value = os.environ.get(env_name)
-            if value:
-                setattr(self, attr, value)
+        values: dict[str, Any] = {
+            attr: value for env_name, attr in mapping.items() if (value := os.environ.get(env_name))
+        }
         cache_flag = os.environ.get("REACHREEL_CACHE")
         if cache_flag and cache_flag.strip().lower() in {"0", "false", "no", "off"}:
-            self.cache_enabled = False
+            values["cache_enabled"] = False
+        return values
 
     def resolved_bgm_dir(self) -> Path:
         return Path(self.bgm_dir).expanduser()
+
+    def qa_values(self) -> dict[str, Any]:
+        return {item.name: getattr(self, item.name) for item in fields(self)
+                if item.name.startswith("qa_")}
 
     def content_profile(self) -> LanguageProfile:
         return profile_for(self.content_language) or PROFILES["zh-CN"]
@@ -379,10 +412,29 @@ def normalize_subtitle_render(value: str | None) -> str:
     return mode if mode in SUBTITLE_RENDER_MODES else "outline"
 
 
+def public_ollama_url(value: object) -> str | None:
+    """Return a usable HTTP(S) endpoint without URL credentials or parameters."""
+    if not isinstance(value, str):
+        return None
+    try:
+        url = urlsplit(value)
+        if url.scheme not in {"http", "https"} or not url.hostname or url.port == 0:
+            return None
+    except ValueError:
+        return None
+    authority = url.netloc.rsplit("@", 1)[-1]
+    return urlunsplit((url.scheme, authority, url.path, "", ""))
+
+
 def settings_to_dict(settings: Settings) -> dict[str, Any]:
     """JSON-serializable snapshot used by manifest.json and stage commands."""
     data = asdict(settings)
     data.pop("bgm_root_resolved", None)
+    endpoint = public_ollama_url(settings.ollama_url)
+    if endpoint is None:
+        data.pop("ollama_url")
+    else:
+        data["ollama_url"] = endpoint
     data["bgm_dir"] = str(settings.bgm_dir)
     data["bgm_file"] = str(settings.bgm_file)
     data["work_root"] = str(settings.work_root)

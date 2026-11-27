@@ -202,6 +202,21 @@ reachreel run /path/to/video.mp4 \
   --height 1080 --fps 30
 ```
 
+### Character-focused narration
+
+- Use `--brief` to tell ReachReel **what it should know about the video**. Include the location, who the people are, and what they did or said. For a character-focused video, give concrete actions, recurring habits, or decisions that show the person's traits or expertise. ReachReel uses this context to analyze the footage and write the script.
+- Use `--style` to tell ReachReel **how to narrate the video**. Specify the perspective, tone, and traits to highlight. For example, ask for third-person narration that shows the subject's expertise through their actions. A custom `--style` overrides `--style-preset`.
+
+This example shows a barista's attention to detail through how he adjusts an espresso shot. `--review-script` stops after writing the script so you can check `output/barista/script.md` before voiceover.
+
+```bash
+reachreel run video.mp4 --workdir output/barista --content-language en --review-script \
+  --brief 'The subject is Ajie, a barista. The first shot ran faster than expected. He checked the timer, set the grinder one step finer, and pulled another shot with the same amount of coffee.' \
+  --style 'Use a conversational third-person voice. Show how methodically Ajie works by describing the change he makes to the grind and what he keeps the same.'
+```
+
+The narration could read, “The first shot ran fast. Ajie checked the timer and set the grinder one step finer. For the next shot, he kept the amount of coffee the same.”
+
 ### What happens during the run
 
 1. `Probe video`: ffprobe reads duration, resolution, frame rate, and audio tracks.
@@ -258,8 +273,8 @@ reachreel run VIDEO [options]
 | `--vlm-frames N` | `3` | Frames extracted per scene |
 | `--vlm-dedup X` | `4.0` | Drop frames whose difference from the previous kept frame is below `X` (`0` disables deduplication) |
 | `--scene-threshold X` | `0.32` | Scene cut threshold; lower is more sensitive |
-| `--style TEXT` | Built-in | Narration style prompt |
-| `--brief TEXT` | Empty | Shooting location / people / background information |
+| `--style TEXT` | Built-in | How to narrate the video, including perspective, tone, and focus |
+| `--brief TEXT` | Empty | What to know about the video, including location, people, and what they did or said |
 | `--density X` | `0.62` | Narration density 0.2–1.0; lower leaves more breathing room |
 | `--max-speedup X` | `1.32` | Maximum speedup allowed when narration runs too long |
 | `--asr MODE` | `mlx-whisper` | `mlx-whisper` or `none` (use the TTS timeline) |
@@ -280,7 +295,7 @@ reachreel run VIDEO [options]
 | `--only STAGES` | All | Run only the specified stages, comma-separated, e.g. `vlm,script` |
 | `--dry-run` | Off | Only print the stages that would run and their cache status; do not call models or write files |
 | `--review-script` | Off | Stop after the script stage and write `script.md` for review |
-| `--force` | Off | Ignore all intermediate artifacts and redo everything |
+| `--force` | Off | Regenerate the selected stages and bypass work directory and shared cache reads |
 | `--no-resume` | Off | Do not reuse scenes/script, but keep the VLM/TTS cache |
 | `--verbose` | Off | Debug logging |
 
@@ -310,11 +325,13 @@ reachreel run video.mp4 --content-language en --height 1080 --fps 30
 reachreel run video.mp4 --content-language en --tts-language en-GB --voice bf_emma
 ```
 
-Available `--only` stages: `probe`, `vlm` (alias `analyze`), `script`, `tts`, `subtitles` (alias `subtitle`), `mix`, `render`, `qa`. Selected stages are redone proactively; unselected stages are left untouched. If a required intermediate file is missing, the command prints an actionable next step.
+`--only` accepts `probe`, `vlm` (alias `analyze`), `script`, `tts`, `subtitles` (alias `subtitle`), `mix`, `render`, and `qa`. The selected stages run in pipeline order. A missing input produces a command for the prerequisite stage.
+
+`run --only` prints the artifact from the last selected stage. For example, `run --only vlm,script` prints `script.json`, and `reachreel tts <workdir>` can resume from that work directory. Scripts that consume a movie path from stdout should use a run that ends at `render`.
 
 ### 7.2 `reachreel analyze`
 
-Runs scene detection + frame extraction + VLM analysis only; no script, no voiceover.
+Runs scene detection, frame extraction, and VLM analysis. It prints `scenes.json` and saves a work directory that `reachreel script <workdir>` can resume.
 
 ```bash
 reachreel analyze video.mp4 --workdir output/analysis
@@ -343,7 +360,9 @@ reachreel render output/ski_20261121_203000 --subtitle-size 52 --subtitle-margin
 reachreel render output/ski_20261121_203000 --no-burn
 ```
 
-It reads `render_settings` from `manifest.json` in the work directory and keeps the previous subtitle style and output size unless you override them with options.
+It uses the saved output size, subtitle style, and subtitle mode by default. Pass `--config` or render options to override the saved settings.
+
+If you replaced the original video, run `analyze` again. If the script or scene timing changed after voiceover, run `reachreel tts <workdir>` again. Render and export identify stale subtitles or mixes and give the command to refresh them. You can still edit `subtitles.srt` and render it directly. Successful renders replace the movie and clear its previous QA summary. Failed encodes preserve the previous movie and its report.
 
 ### 7.4 `reachreel doctor`
 
@@ -372,7 +391,7 @@ Exit code 0 means all required items passed.
 A full run is slow; when you change the script, subtitles, or BGM, redo only the corresponding stage:
 
 ```bash
-# Rewrite the script only: reuse scenes.json / the VLM cache, call the local LLM again
+# Rewrite the script from the existing scenes.json
 reachreel script output/xxx
 
 # Re-voice and recompute the narration timeline only
@@ -381,7 +400,7 @@ reachreel tts output/xxx
 # Redo subtitles only: mlx-whisper by default; --asr none uses the TTS timeline
 reachreel subtitle output/xxx
 
-# Redo mixing only: reuses the BGM source from the manifest by default
+# Redo mixing only. An automatic pick can be reused from the same directory.
 reachreel mix output/xxx
 reachreel mix output/xxx --no-bgm
 reachreel mix output/xxx --bgm inputs/bgm/another.mp3
@@ -393,7 +412,9 @@ reachreel render output/xxx
 reachreel qa output/xxx
 ```
 
-Stage commands read settings from `manifest.json` (models, voice, render parameters); command-line options take precedence.
+Stage commands start from the settings saved in `manifest.json`. Explicit `--config` keys, environment variables, and command-line options can override those settings in that order. [Configuration precedence](CONFIGURATION.md#precedence)
+
+`reachreel script` refreshes scene analysis when its VLM settings change. With `run --only`, include `vlm,script` to apply those changes. Passing a new `--bgm-dir` selects from that directory again. An explicit `--bgm` still takes precedence.
 
 ### 7.6 `reachreel qa`
 
@@ -428,6 +449,8 @@ Exit codes:
 - `--strict`: returns `1` even when there are only warnings.
 
 Results are written to `qa.json`. `reachreel run` also runs QA once by default; add `--no-qa` to skip it.
+
+QA checks that the existing movie matches its recorded inputs. After refreshing the narration, subtitles, or mix, follow the reported stage commands and render again before requesting a new QA result.
 
 The hard-subtitle pixel overflow check renders the subtitle layer on a 1080p black background using the SRT timings (2–4 fps), which usually adds a few seconds. If you do not need it, set `skip_subtitle_pixels = true` in `[qa]`.
 
@@ -470,10 +493,11 @@ For subtitles, `--subtitle-preset douyin|reels|shorts|landscape` (or `subtitle_p
 ```text
 output/<video-name>_<timestamp>/
 ├── final.mp4          # final cut
+├── edit/              # optional editing bundle (reachreel export)
 ├── subtitles.srt      # subtitles (soft-subtitle compatible)
 ├── subtitles.ass      # hard-subtitle layout (PlayRes = output resolution)
 ├── script.json        # editable narration segments
-├── script.md          # script preview for the review gate
+├── script.md          # optional script review with scene evidence
 ├── scenes.json        # scenes + VLM analysis
 ├── vlm_cache.json     # VLM resume cache
 ├── timeline.json      # narration placement
@@ -588,13 +612,13 @@ The higher the CRF, the smaller the file and the lower the quality. The default 
 
 ### 10.1 Change the script
 
-Edit:
+Use `--review-script` to get a `script.md` preview with evidence from the referenced scenes. Check any segment flagged for missing evidence against the footage or your `brief`. Edit the narration text in this file.
 
 ```text
 output/xxx/script.json
 ```
 
-Change only `text`, save, then rerun the same command (with the same `--workdir`):
+Save your `text` changes, then rerun the same command with the same `--workdir`.
 
 ```bash
 reachreel run video.mp4 --workdir output/xxx
@@ -610,7 +634,6 @@ The program will:
 You can also do it step by step instead of running the whole pipeline at once:
 
 ```bash
-reachreel script   output/xxx   # regenerate the script
 reachreel tts      output/xxx   # re-voice the new script
 reachreel subtitle output/xxx   # redo subtitles
 reachreel mix      output/xxx   # redo mixing
@@ -620,6 +643,12 @@ reachreel licenses output/xxx   # export the BGM license list
 reachreel cache info            # shared cache location and size
 ```
 
+Normal resume preserves manually edited scripts. It regenerates tracked, unedited scripts when writing inputs such as `--brief` or `--style-preset` change. To replace a draft deliberately, run `reachreel script <workdir>` or select the `script` stage explicitly with `run --only`. Both `--force` and `--no-resume` can also replace the script when that stage runs.
+
+When the requested content language differs from a tracked, manually edited script, resume stops before replacing that script or sending it to the new voice. Use `reachreel script <workdir> --content-language en` to deliberately switch to a newly generated English script.
+
+After voiceover, open `review.md` to find segments whose measured duration exceeds the time available in their linked scenes. Shorten those lines and rerun TTS before checking the new render.
+
 ### 10.2 Change subtitles only
 
 Edit `output/xxx/subtitles.srt`, then:
@@ -628,7 +657,7 @@ Edit `output/xxx/subtitles.srt`, then:
 reachreel render output/xxx
 ```
 
-`render` uses the existing `mix.wav` and your SRT to regenerate `subtitles.ass` and burn the subtitles; it does not rerun TTS.
+`render` uses the existing `mix.wav` and the edited SRT. It regenerates `subtitles.ass` for burned-in subtitles or updates the subtitle track in soft-subtitle mode.
 
 ### 10.3 Redo everything
 
@@ -636,7 +665,7 @@ reachreel render output/xxx
 reachreel run video.mp4 --workdir output/xxx --force
 ```
 
-This re-extracts frames, re-runs VLM, rewrites the script, re-voices, and re-renders.
+This re-extracts frames, re-runs VLM, rewrites the script, re-voices, and re-renders. VLM and TTS bypass cache reads in both the work directory and the shared cache.
 
 ### 10.4 Redo scenes/script only, keep VLM
 
@@ -655,7 +684,37 @@ bgm_volume = 0.15       # lighter
 ambient_volume = 0.22   # ambient sound more audible
 ```
 
-Then rerun the same command (this remixes and re-renders).
+Pass the file explicitly when you remix, then render and check the updated cut.
+
+```bash
+reachreel mix output/xxx --config config.toml
+reachreel render output/xxx
+reachreel qa output/xxx
+```
+
+### 10.6 Export to an editor
+
+Run `export` once the original video, `narration.wav`, and `subtitles.srt` are available. It uses the existing work directory and runs locally with FFmpeg.
+
+```bash
+reachreel export output/my-job
+reachreel export output/my-job --format mov --out output/my-job-prores
+reachreel export output/my-job --fps 30 --out output/my-job-30fps
+```
+
+The default destination is `output/my-job/edit`. Choose a new `--out` directory to export another version. MP4 uses H.264 with AAC. MOV uses ProRes 422 with PCM audio. Both keep ReachReel subtitles out of the picture and use a constant frame rate, honoring the work directory's output height and frame rate settings when available. The movie includes the existing full mix when available and uses narration audio otherwise.
+
+The bundle supports whole-number frame rates and the standard fractional rates 23.976, 29.97, 59.94, and 119.88 fps. For other rates, pass `--fps` to choose a supported export rate without changing the job settings.
+
+| Editor | Import |
+|---|---|
+| Premiere Pro, DaVinci Resolve | `timeline.xml` (Final Cut Pro 7 XML) |
+| Final Cut Pro | `timeline.fcpxml` (FCPXML 1.9) via File → Import → XML |
+| Jianying / CapCut desktop | Import `video.mp4` as media and `subtitles.srt` through the caption menu. To use independent narration, mute the movie audio and align `narration.wav` to the start. |
+
+The XML timelines use the movie's picture and place `narration.wav` on a separate track. Import `subtitles.srt` separately to edit captions. If the bundle includes `mix.wav`, use it in place of the narration track to hear the existing narration, ambient sound, and BGM mix. Share the whole directory. If its path changes, relink the video and narration files from the new directory.
+
+Before handing off a bundle, verify the import in the receiving editor. Check clip length, frame rate, narration and caption alignment, and media relinking after moving the bundle.
 
 ---
 

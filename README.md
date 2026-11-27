@@ -14,7 +14,7 @@ Drop in a raw video clip, optionally add a few words of context (`--brief`) and 
 ## Who ReachReel is for
 
 - **Video creators & vloggers**: Go from raw camera clips to a ready-to-post narrated reel (Douyin, Reels, Shorts, YouTube, Bilibili) without staring at a blank page or recording scratch tracks.
-- **Video editors**: Generate a first narrated rough cut, review and edit `script.md` / `script.json` before voiceover (`--review-script`), and re-render only the subtitles, mix, or final cut without re-analyzing the video.
+- **Video editors**: Build a narrated rough cut in stages, review the script before voiceover, and redo just the subtitles, mix, or render when needed.
 - **Developers**: A clean, resumable, local-first Python pipeline (`probe -> vlm -> script -> tts -> subtitles -> mix -> render -> qa`) built on FFmpeg, Ollama, Kokoro-82M (MLX), and `mlx-whisper`.
 
 ---
@@ -23,8 +23,8 @@ Drop in a raw video clip, optionally add a few words of context (`--brief`) and 
 
 ### Story & Script
 - **Scene-aware writing**: Understands what happens in each shot (location, subjects, actions, mood) and writes chronological narration instead of generic filler.
-- **Your voice & context**: Guide the tone with `--style` and anchor facts/place names with `--brief`, or control pacing with `--density`.
-- **Edit before voiceover**: Run with `--review-script` to pause after writing `script.md`, tweak the lines, and continue straight to voiceover.
+- **Narration and pacing**: Supply background facts and actions with `--brief`, guide the narration's perspective, tone, and focus with `--style`, and control pacing with `--density`. [Character-focused example](docs/en/USER_GUIDE.md#character-focused-narration)
+- **Edit before voiceover**: Run with `--review-script` to pause for review. Read `script.md`, edit the lines in `script.json`, then continue with `reachreel tts <workdir>`.
 
 ### Voiceover (Chinese & English)
 - **Bilingual narration**: Supports Mandarin Chinese (`zh-CN`), American English (`en-US`), and British English (`en-GB`) via Kokoro-82M on Apple Silicon — offline after first model download.
@@ -111,6 +111,7 @@ final.mp4        # publish-ready video
 subtitles.srt    # subtitles (soft-subtitle compatible)
 subtitles.ass    # hard-subtitle layout (real output pixel coordinates)
 script.json      # editable narration segments
+script.md        # optional script preview with scene evidence
 scenes.json      # detected scenes + visual analysis
 timeline.json    # narration placement
 narration.wav    # narration-only track
@@ -130,6 +131,13 @@ reachreel licenses output/<video-name>_<timestamp>
 # Inspect the plan, then rerun VLM + script only
 reachreel run video.mp4 --workdir output/<video-name>_<timestamp> --only vlm,script --dry-run
 reachreel run video.mp4 --workdir output/<video-name>_<timestamp> --only vlm,script
+```
+
+Export an editing bundle with clean H.264 MP4 or ProRes 422 MOV, independent WAV and SRT files, and timeline XML for Premiere Pro, DaVinci Resolve, and Final Cut Pro. CapCut can import the individual assets. See the [user guide](docs/en/USER_GUIDE.md).
+
+```bash
+reachreel export output/my-job
+reachreel export output/my-job --format mov --out output/my-job-prores
 ```
 
 ---
@@ -191,7 +199,7 @@ reachreel/
 - Narration is written by a local LLM and may occasionally over-interpret footage; review `script.json` before publishing.
 - Subtitles are phrase/line-timed from Whisper speech boundaries, not word-level karaoke.
 - BGM is chosen from `inputs/bgm/` without automatic mood matching.
-- Exports H.264/AAC only; no HDR, 10-bit, hardware encoding, or smart vertical reframing yet.
+- The publishing render uses H.264/AAC. The editing export also offers ProRes 422. HDR workflows, hardware encoding, and smart vertical reframing are future work.
 - Desktop UI, batch folder watching, and direct publishing integrations (CapCut/Bilibili/YouTube) are on the [roadmap](docs/en/ROADMAP.md).
 
 ---

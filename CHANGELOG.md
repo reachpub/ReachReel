@@ -2,13 +2,33 @@
 
 # Changelog
 
-## [Unreleased]
+
+## [0.5.0] - 2026-11-27
 
 ### Added
 
+- Script review shows the linked scene evidence and flags segments without evidence. The post-voiceover review flags segments whose measured duration exceeds their scene budget.
+- `reachreel export` creates an editing bundle with H.264 MP4 or ProRes 422 MOV, separate narration and SRT captions, an optional mix, and XML timelines for Premiere Pro, DaVinci Resolve, and Final Cut Pro.
 - Speaking style presets via `style_preset` / `--style-preset` (`oral`, `casual`, `literary`, `documentary`, `commentary`, defaulting to `oral`), custom style override via `style` / `--style`, and an optional spoken-delivery polish pass (`script_oral_polish`, `--oral-polish` / `--no-oral-polish`) paired with concrete, conversational VLM scene prompts (`vf-vlm-3`).
 - `Qwen3TTSEngine` (`tts_engine = "qwen3"` / `--tts qwen3`) via `mlx-audio`, supporting `CustomVoice` speakers (`Serena`, `Vivian`, `Uncle_Fu`, `Dylan`, `Eric`, `Ryan`, `Aiden`) with natural-language `tts_instruct`, `VoiceDesign`, and `Base` zero-shot voice cloning (`tts_ref_audio` / `tts_ref_text`).
 - Configurable voice and acoustic parameters across config (`[tts]` table or top-level `tts_*` keys), CLI flags (`--qwen3-model`, `--tts-speed`, `--tts-instruct`, `--tts-ref-audio`, `--tts-ref-text`, `--tts-temperature`, `--tts-top-p`, `--tts-top-k`, `--tts-repetition-penalty`, `--tts-seed`, `--tts-chunk-pause`, `--tts-pitch`, `--tts-volume`), and per-segment overrides (`voice`, `instruct`, `speed`) in `script.json`, plus comma-blended Kokoro voices and a `reachreel voices` command.
+
+### Fixed
+
+- Partial runs save the work directory and print the last selected stage's artifact. `analyze` also saves a resumable work directory. Stage commands report missing or stale prerequisites and how to regenerate them.
+- Explicit configuration, environment variables, and command-line options take precedence over saved work directory settings. Normal resume regenerates unchanged, tracked drafts when writing inputs change and preserves edited drafts.
+- VLM retries failed scenes on resume. `--force` bypasses both work directory and shared cache reads for VLM and TTS.
+- Both render commands use the same pipeline and preserve the saved subtitle mode unless overridden.
+- QA rejects a stale movie after its inputs change. Render and export detect changes to the source and scene timing. Failed encodes preserve the previous movie and QA result.
+- Ollama URLs are saved without credentials, query parameters, or fragments.
+- Remixing selects a fresh track after the BGM directory changes. Standalone script generation applies changed VLM settings to scene analysis.
+- TTS caches publish WAV files atomically and retry synthesis if cached audio is invalid or truncated.
+- Editing export preserves the picture span during frame-rate conversion. Unsupported rates report an error with an `export --fps` override.
+
+## [0.4.0] - 2026-11-23
+
+### Added
+
 - English narration, voiceover, and subtitle support (`en-US` and `en-GB` promoted to `supported` in `src/reachreel/languages.py`). Running `reachreel run video.mp4 --content-language en` (or `--tts-language en-GB`) now resolves the full English profile automatically: script target rate (`14.5` chars/sec), default Kokoro voice (`af_heart` / `bf_emma`), default macOS `say` voice (`Samantha` / `Daniel`), Whisper `en` hint, subtitle line width (`42` chars), Latin font (`Helvetica Neue`), and soft-subtitle track metadata (`language=eng`).
 - Optional `tts-en` extra in `pyproject.toml` (`spacy`, `num2words`, `espeakng-loader`, `phonemizer-fork`) that stays torch-free by matching `mlx-audio`'s non-transformer `KokoroPipeline` (`trf=False` + `en_core_web_sm` + `EspeakFallback`), plus `tts-zh` as the Chinese group extra.
 - English-aware TTS chunking in `_split_for_tts` (splits on sentence/clause boundaries and spaces up to 250 chars instead of chopping words at 70 chars) and punctuation-aware, balanced English subtitle wrapping in `media/subtitles.py`.
@@ -16,15 +36,16 @@
 - Validation for `en-US` and `en-GB` per `docs/en/LANGUAGES.md` §6: Whisper round-trip CER 0.00% (`af_heart`, `am_michael`, `bf_emma`) and 0.51% (`bm_george`), plus an end-to-end 1080p Niagara Falls run passing QA 20/20 (`pass=20 warn=0 fail=0`).
 - Bilingual MkDocs Material site (`mkdocs.yml`, `scripts/mkdocs_hooks.py`, `docs` extra in `pyproject.toml`) with English at the root and Simplified Chinese under `/zh-CN/`, plus `.github/workflows/docs.yml` to copy `README.md` / `README.zh-CN.md` into `index.md`, build in strict mode, and deploy to GitHub Pages.
 - `[tool.apdev] pypi_repository = "reachreel"` selects the `[reachreel]` section of `~/.pypirc` for `apdev release`, so this project's uploads use its own PyPI account while the other repositories keep the default section. Requires `apdev >= 0.2.6`; DEVELOPMENT documents the resolution order, the first-upload ownership rule, and the `TWINE_REPOSITORY` fallback.
-- PyPI-facing project metadata in `pyproject.toml`: `Project-URL` entries (homepage, repository, documentation, changelog, issues), eleven Trove classifiers, keywords, and the author. `twine check` passes for the wheel and the sdist, the licence renders through PEP 639 (`License-Expression: Apache-2.0` plus `License-File: LICENSE`/`NOTICE`), and the build emits Metadata-Version 2.5.
 
 ### Changed
 
 - `speech_chars_per_second`, `voice`, `say_voice`, `subtitle_max_chars`, and `subtitle_font` now default to `0` / empty in `Settings` and `config.example.toml`, meaning "follow the resolved language profile" (Chinese runs still resolve to `3.9`, `zf_xiaoxiao`, `Tingting`, `18`, and `PingFang SC`; explicit overrides always win).
+- PyPI metadata now credits `reachpub` and links to the bilingual documentation site.
+- The `dev` extra now requires `apdev[dev]>=0.2.8`.
 
 ### Fixed
 
-- The `dev` extra did not actually list `pre-commit`, although `.pre-commit-config.yaml` and the docs tell contributors that `uv pip install -e '.[dev]'` provides it. It is part of the extra again (`pre-commit>=3.5`).
+- The CLI reports the version from installed package metadata.
 
 ## [0.3.0] - 2026-11-22
 
@@ -49,6 +70,7 @@
 - `tests/integration/test_smoke.py::OnlyReuseTest`: `run --only tts`, `--only mix,render`, and `--only qa` are asserted not to redo earlier stages, using artifact hashes.
 - Unit tests for timeline boundaries: empty list, no scenes, unknown scene id, overlong narration warning, and clips shorter than `tail_padding`.
 - Retroactive `v0.1.0` (`b8a60ae`) and `v0.2.0` (`c9c3652`) tags, each with a GitHub release whose wheel and sdist were built from the tagged commit. Both are labelled retroactive because neither version had ever been tagged or announced.
+- PyPI-facing project metadata in `pyproject.toml`: `Project-URL` entries (homepage, repository, documentation, changelog, issues), eleven Trove classifiers, keywords, and the author. `twine check` passes for the wheel and the sdist, the licence renders through PEP 639 (`License-Expression: Apache-2.0` plus `License-File: LICENSE`/`NOTICE`), and the build emits Metadata-Version 2.5.
 
 ### Changed
 
@@ -63,6 +85,7 @@
 
 - CI now runs on `macos-15`: the `macos-14` label was retired and queued jobs failed with "The configuration 'macos-14-arm64-us-xl' is not supported".
 - `render --crf` was parsed but never applied; the value is now forwarded to `Settings.crf` like `--height` / `--fps`, and a test asserts manifest `render_settings` are reused while CLI flags still win.
+- The `dev` extra did not actually list `pre-commit`, although `.pre-commit-config.yaml` and the docs tell contributors that `uv pip install -e '.[dev]'` provides it. It is part of the extra again (`pre-commit>=3.5`).
 
 ## [0.2.0] - 2026-11-22
 

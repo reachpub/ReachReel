@@ -18,8 +18,8 @@
 
 - 本地镜头检测 + 抽帧；
 - Ollama VLM 逐镜头画面理解；
-- 本地 LLM 写中文旁白；
-- Kokoro 中文配音；
+- 本地 LLM 写中文和英文旁白；
+- Kokoro 和 Qwen3-TTS 中文、英文配音；
 - mlx-whisper 语音边界 + 原稿字幕；
 - BGM / 原声 / 旁白侧链闪避；
 - 硬字幕 / 软字幕；
@@ -37,14 +37,14 @@
 
 ## 0.1 最近完成
 
-- **P0-2 阶段级命令（已完成）**：`script` / `tts` / `subtitle` / `mix` / `render` / `qa`，已用 6s 素材走通 `script → tts → subtitle → mix → render → qa`；`run --only vlm,script` 与 `run --dry-run` 已可用。
+- **P0-2 阶段级命令（已完成）**。`run --only vlm,script` 保存工作目录并回显 `script.json`，随后可用独立的 `tts` 命令接续。显式配置字段和命令行参数可以覆盖保存的设置。
 - **P0-5 QA 闸门（已完成）**：`reachreel qa`，输出 `qa.json`；`run` 默认自动执行；`--strict` 警告也失败。新增字幕像素超框、旁白/字幕逐句偏差、`astats` 削波检查、`[qa]` 阈值配置、静态长镜头冻结误报调优。
 - **字幕布局（已完成）**：硬字幕改为 `subtitles.ass`，`PlayRes` 等于输出分辨率，`subtitle_size` / 边距按真实像素；竖屏超框问题已修复。
 - **P0-1 旋转元数据（已完成）**：显示/编码宽高分离，并补齐旋转测试。
 - **P0-3 重试与 quality flags（已完成）**：VLM/LLM/TTS/Whisper 重试或回退，降级写入 `manifest.quality_flags`。
 - **P0-8 BGM 元数据（已完成）**：`inputs/bgm/manifest.json`、`manifest.bgm_metadata`、`reachreel licenses`。
 - **P0-4 字幕安全区（已完成）**：平台预设、标点/单词断句、按停顿加权的时间分配、硬性行数/字数约束。
-- **P0-7 跨工作目录缓存（已完成）**：视频指纹 VLM 缓存、按内容键控的 TTS 音频、`cache info` / `cache clean`。
+- **P0-7 跨工作目录缓存（已完成）**。VLM 在续跑时重试失败的镜头，`--force` 跳过本地及共享缓存的读取。TTS 按内容缓存成功合成的音频。
 - **P0-9 macOS 部分（已完成）**：UTF-8 子进程、`platformdirs` 缓存、`doctor --json`、中文/空格路径集成 smoke。
 - **P1-3 人工确认闸门（已完成）**：`--review-script` 生成 `script.md` 并在 TTS 前停下。
 - **P1-4 音频（已完成）**：两遍 `loudnorm`（失败回退单遍）和 BGM 结尾淡出。
@@ -131,14 +131,14 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script --dry-run
 - QA SRT 解析/退出码测试，以及 QA 阈值、astats 解析、字幕边距、逐句对齐、`--only` 解析测试；
 - `run --only` 复用 smoke：`tests/integration/test_smoke.py::OnlyReuseTest` 对比 `scenes.json` / `narration.wav` / `subtitles.srt` 的哈希，证明 `--only tts`、`--only mix,render`、`--only qa` 都不会重跑前面的阶段；
 - 无音轨 / 单声道 / 5.1 的探测层（`probe_video` 报 0 / 1 / 6 声道）与旋转端到端（用 `-display_rotation` 写入 90° / 180° / 270°，断言编码尺寸与显示尺寸）；
-- GitHub Actions：`macos-15` runner + lint + unit tests（不跑大模型）。
+- GitHub Actions 在 macOS 上执行 lint、单元测试和无需模型的集成测试，覆盖续跑、镜头、时间轴和剪辑导出。
 
-**验收**：PR 必须过 lint + 单元测试；核心路径有回归测试；集成 fixture 本地用 `REACHREEL_INTEGRATION=1` 跑。
+**验收**。PR 检查包括 lint、单元测试及选定的媒体集成测试。本地设置 `REACHREEL_INTEGRATION=1` 可执行完整集成测试。
 
 ### P0-7 缓存键与跨工作目录复用（已完成）
 
-- VLM 结果以“视频采样指纹 + 模型 + prompt 版本 + 语言 + 抽帧宽度 + brief”为键。
-- TTS 音频以“engine + model + voice + speed + text”为键。
+- VLM 共享缓存用视频指纹、分析设置和镜头帧内容识别可复用的结果。
+- TTS 音频按文本和生效的合成设置复用。
 - 可选共享根目录默认使用平台缓存目录，可用 `cache_dir` 覆盖。
 - 工作目录缓存仍是主要可见产物，共享缓存会合并进去。
 - `reachreel cache info` / `cache clean --yes` 用于查看和清理。
@@ -189,12 +189,12 @@ Windows/桌面端待做：
 
 ### P1-1 TTS 升级
 
-- 接入 Qwen3-TTS、IndexTTS2、Ming-3.0 TTS；
+- 已完成 Qwen3-TTS 接入，包含 `CustomVoice`、`VoiceDesign`，以及使用授权参考音频克隆声音的选项。
+- 已完成 `script.json` 逐段 `voice`、`instruct` 和 `speed` 控制。
+- 接入 IndexTTS2 和 Ming-3.0 TTS。
 - 音色试听/选择；
 - 多音字/专有名词发音词典；
-- 情绪/语速按段落控制；
 - 句尾停顿更自然；
-- 可选声音克隆（需明确授权）。
 
 **目标**：中文自然度明显超过 Kokoro，接近商业解说。
 
@@ -211,12 +211,13 @@ Windows/桌面端待做：
 
 ### P1-3 写稿质量
 
-- 已完成：人工审核 gate（`--review-script` 生成 `script.md`，配音前停下）；
-- 事实约束：每个句子必须能追溯到某个 `scene_id` 的 VLM 证据；
+- 已完成配音前审校。`--review-script` 生成的 `script.md` 展示关联镜头的证据，并标出缺少证据的段落。
+- 已完成旁白风格预设，包括 `oral`、`casual`、`literary`、`documentary` 和 `commentary`。
+- 已完成时长提示。`review.md` 标出实测配音时长超出关联镜头预算的段落。
+- 将文案中的事实陈述与具体镜头证据或 `brief` 中的事实逐条核对。
 - 专有名词白名单（来自 `brief`）；
-- 风格预设：Vlog / 纪录片 / 吐槽 / 治愈 / 悬疑；
 - 开头 3 秒 Hook；
-- 段落时长预算：按 TTS 实际时长反推字数，而不是只按目标字数；
+- 用 TTS 实测时长改进初稿的字数预算；
 - 开头 3 秒 Hook 的质量指标。
 
 ### P1-4 音频质量
@@ -302,9 +303,10 @@ Windows/桌面端待做：
 ### P2-5 发布集成
 
 - 导出到剪映/CapCut 草稿；
-- 导出到 Premiere/FCPXML；
 - 直接发布到 YouTube/B站/抖音（需用户授权）；
 - 生成标题/简介/标签。
+
+`reachreel export` 已提供剪辑素材包，包含 Premiere Pro / DaVinci Resolve XML 与 FCPXML 时间线，以及可在剪映和 CapCut 中分别导入的素材和字幕。
 
 ---
 
@@ -363,7 +365,7 @@ Windows/桌面端待做：
 
 1. **测试**：场景检测、字幕、时间轴、混音的回归测试；
 2. **字幕**：断句、安全区、逐字高亮；
-3. **TTS provider**：Qwen3-TTS / IndexTTS2 / Piper；
+3. **TTS provider**：IndexTTS2 / Piper；
 4. **VLM 代表帧**：运动/变化检测选帧；
 5. **QA**：黑帧、冻结、削波、超框；
 6. **文档**：更多真实素材的调参案例。

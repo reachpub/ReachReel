@@ -16,6 +16,7 @@ import wave
 from pathlib import Path
 
 from reachreel.core.config import Settings
+from reachreel.core.util import sha1_file
 from reachreel.domain.models import NarrationSegment, Scene
 from reachreel.domain.timeline import place_segments
 
@@ -24,14 +25,14 @@ ENABLED = os.environ.get("REACHREEL_INTEGRATION") == "1"
 SAMPLE_RATE = 48000
 
 
-def _write_tone(path: Path, seconds: float) -> None:
-    """Write a short 16-bit mono WAV; content does not matter for ``atempo``."""
+def _write_tone(path: Path, seconds: float, frequency: float = 220.0) -> None:
+    """Write a short 16-bit mono WAV for ``atempo``."""
     import math
 
     frames = int(seconds * SAMPLE_RATE)
     samples = bytearray()
     for index in range(frames):
-        value = int(12000 * math.sin(2 * math.pi * 220 * index / SAMPLE_RATE))
+        value = int(12000 * math.sin(2 * math.pi * frequency * index / SAMPLE_RATE))
         samples += value.to_bytes(2, "little", signed=True)
     with wave.open(str(path), "wb") as fh:
         fh.setnchannels(1)
@@ -99,6 +100,18 @@ class NarrationSpeedUpTest(unittest.TestCase):
 
         self.assertEqual([segment.audio_path for segment in segments], paths)
         self.assertEqual([segment.tts_speed for segment in segments], [1.0, 1.0])
+
+    def test_replaced_audio_does_not_reuse_an_old_speed_up(self):
+        settings = Settings(max_speedup=1.6)
+        scenes = [Scene(id=1, start=0.0, end=3.0)]
+        first = self._segments((4.0,))
+        place_segments(first, scenes, 3.0, settings)
+        previous = sha1_file(Path(first[0].audio_path))
+
+        second = self._segments((4.0,))
+        _write_tone(Path(second[0].audio_path), 4.0, frequency=440.0)
+        place_segments(second, scenes, 3.0, settings)
+        self.assertNotEqual(sha1_file(Path(second[0].audio_path)), previous)
 
 
 if __name__ == "__main__":

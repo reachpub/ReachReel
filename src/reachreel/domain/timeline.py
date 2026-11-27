@@ -4,9 +4,10 @@ from __future__ import annotations
 import logging
 import wave
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from ..core.config import Settings
-from ..core.util import atomic_write_json, clamp, run
+from ..core.util import atomic_write_json, clamp, run, sha1_file
 from .models import NarrationSegment, Scene
 
 LOG = logging.getLogger("reachreel.domain.timeline")
@@ -35,29 +36,33 @@ def _apply_atempo(segment: NarrationSegment, factor: float) -> None:
     if factor <= 1.001 or not segment.audio_path:
         return
     src = Path(segment.audio_path)
-    dst = src.with_name(src.stem + f"_fit{factor:.3f}.wav")
+    dst = src.with_name(f"{src.stem}_fit{factor:.5f}_{sha1_file(src)[:16]}.wav")
     if not dst.exists():
-        run(
-            [
-                "ffmpeg",
-                "-hide_banner",
-                "-nostdin",
-                "-loglevel",
-                "error",
-                "-y",
-                "-i",
-                str(src),
-                "-filter:a",
-                f"atempo={factor:.5f}",
-                "-ar",
-                "48000",
-                "-ac",
-                "1",
-                "-c:a",
-                "pcm_s16le",
-                str(dst),
-            ]
-        )
+        with TemporaryDirectory(dir=dst.parent, prefix=".atempo-") as directory:
+            output = Path(directory) / dst.name
+            run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-nostdin",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-i",
+                    str(src),
+                    "-filter:a",
+                    f"atempo={factor:.5f}",
+                    "-ar",
+                    "48000",
+                    "-ac",
+                    "1",
+                    "-c:a",
+                    "pcm_s16le",
+                    str(output),
+                ],
+                timeout=120,
+            )
+            output.replace(dst)
     segment.audio_path = str(dst)
     segment.duration = _wav_duration(dst)
     segment.tts_speed = round(segment.tts_speed * factor, 4)
@@ -100,7 +105,7 @@ def place_segments(
         LOG.warning(
             "Narration ends at %.1fs, %.1fs after the video; shorten the script or raise --max-speedup",
             segments[-1].end,
-            video_duration,
+            segments[-1].end - video_duration,
         )
     for segment in segments:
         LOG.info(

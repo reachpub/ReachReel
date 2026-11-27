@@ -12,6 +12,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from pathlib import Path
+from tempfile import mkstemp
 from typing import Any
 
 from ..i18n import t
@@ -82,7 +83,8 @@ def ffprobe_json(path: Path) -> dict[str, Any]:
             "-show_format",
             "-show_streams",
             str(path),
-        ]
+        ],
+        timeout=60,
     )
     return json.loads(proc.stdout)
 
@@ -129,9 +131,16 @@ def ffprobe_duration(path: Path) -> float:
 
 def atomic_write_json(path: Path, data: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    fd, name = mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    tmp = Path(name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(data, file, ensure_ascii=False, indent=2)
+            file.flush()
+            os.fsync(file.fileno())
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def read_json(path: Path, default: Any = None) -> Any:
