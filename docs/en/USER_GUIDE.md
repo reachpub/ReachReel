@@ -260,11 +260,11 @@ reachreel run VIDEO [options]
 | `--out DIR` | `output` | Work directory root; only takes effect when `--workdir` is not specified |
 | `--config FILE` | None | TOML configuration file |
 | `--bgm FILE` | Random | Specific BGM file |
-| `--bgm-dir DIR` | `bgm` | BGM directory |
+| `--bgm-dir DIR` | `inputs/bgm` | BGM directory |
 | `--bgm-fade N` | `2.0` | Fade the BGM out over the final N seconds |
 | `--no-bgm` | Off | Do not mix BGM |
-| `--voice NAME` | Follows language | Kokoro voice (`zf_xiaoxiao`, `af_heart`, `bf_emma`, ...) |
-| `--tts ENGINE` | `kokoro` | `kokoro` or `say` (for debugging) |
+| `--voice NAME` | Follows language | Built-in voice (`zf_xiaoxiao`, `af_heart`, `Serena`, `Ryan`, ...); audition with `reachreel voices --preview <name>` |
+| `--tts ENGINE` | `kokoro` | `kokoro`, `qwen3`, or `say` (for debugging) |
 | `--tts-language TAG` | Follows content language | Voiceover language as a BCP 47 tag (`zh-CN`, `en-US`, `en-GB`); the voice must match it |
 | `--vlm-model NAME` | `qwen3-vl:8b-instruct` | Visual understanding model |
 | `--llm-model NAME` | `qwen3:30b-instruct` | Script-writing model |
@@ -295,6 +295,7 @@ reachreel run VIDEO [options]
 | `--only STAGES` | All | Run only the specified stages, comma-separated, e.g. `vlm,script` |
 | `--dry-run` | Off | Only print the stages that would run and their cache status; do not call models or write files |
 | `--review-script` | Off | Stop after the script stage and write `script.md` for review |
+| `--json` | Off | Print a machine-readable JSON plan (`--dry-run`) or execution summary (including `workdir`, artifacts, QA report, and `next_command`) to stdout |
 | `--force` | Off | Regenerate the selected stages and bypass work directory and shared cache reads |
 | `--no-resume` | Off | Do not reuse scenes/script, but keep the VLM/TTS cache |
 | `--verbose` | Off | Debug logging |
@@ -313,11 +314,10 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script
 # Redo subtitles and the final render only
 reachreel run video.mp4 --workdir output/xxx --only subtitles,mix,render
 
-# Generate the script, review script.md, then continue
+# Generate the script, review script.md, then continue in one command
 reachreel run video.mp4 --workdir output/xxx --review-script
 # edit output/xxx/script.json, then:
-reachreel tts output/xxx
-reachreel subtitle output/xxx && reachreel mix output/xxx && reachreel render output/xxx
+reachreel resume output/xxx
 
 # English narration, voiceover, and subtitles (requires the tts-en extra + en_core_web_sm)
 reachreel run video.mp4 --content-language en --height 1080 --fps 30
@@ -485,6 +485,17 @@ reachreel --cache-dir /tmp/rr-cache run video.mp4
 ```
 
 For subtitles, `--subtitle-preset douyin|reels|shorts|landscape` (or `subtitle_preset` in config) applies platform safe margins and overrides the manual margin values.
+
+### 7.9 `reachreel status`
+
+Inspect an existing work directory to see which stages are `ok`, `stale` (inputs changed since the artifact was built), or `missing`, whether `script.json` was manually edited, the latest QA status, and the next command to run:
+
+```bash
+reachreel status output/xxx
+reachreel status output/xxx --json
+```
+
+`--json` emits a machine-readable report containing `complete`, `video`, `settings`, `script_edited`, `stages`, `artifacts`, `quality_flags`, `qa`, `next_stage`, and `next_command`. This is useful for scripting and AI coding agents resuming or troubleshooting an existing job.
 
 ---
 
@@ -700,9 +711,10 @@ Run `export` once the original video, `narration.wav`, and `subtitles.srt` are a
 reachreel export output/my-job
 reachreel export output/my-job --format mov --out output/my-job-prores
 reachreel export output/my-job --fps 30 --out output/my-job-30fps
+reachreel export output/my-job --narration-mode segments --out output/my-job-segs
 ```
 
-The default destination is `output/my-job/edit`. Choose a new `--out` directory to export another version. MP4 uses H.264 with AAC. MOV uses ProRes 422 with PCM audio. Both keep ReachReel subtitles out of the picture and use a constant frame rate, honoring the work directory's output height and frame rate settings when available. The movie includes the existing full mix when available and uses narration audio otherwise.
+The default destination is `output/my-job/edit`. Choose a new `--out` directory to export another version. MP4 uses H.264 with AAC. MOV uses ProRes 422 with PCM audio. Both keep ReachReel subtitles out of the picture and use a constant frame rate, honoring the work directory's output height and frame rate settings when available. The movie includes the existing full mix when available and uses narration audio otherwise. Pass `--narration-mode segments` to export per-segment WAV clips under `segments/seg_*.wav` so you can reposition individual lines in an NLE and round-trip them back with `reachreel import --timeline`.
 
 The bundle supports whole-number frame rates and the standard fractional rates 23.976, 29.97, 59.94, and 119.88 fps. For other rates, pass `--fps` to choose a supported export rate without changing the job settings.
 
@@ -715,6 +727,72 @@ The bundle supports whole-number frame rates and the standard fractional rates 2
 The XML timelines use the movie's picture and place `narration.wav` on a separate track. Import `subtitles.srt` separately to edit captions. If the bundle includes `mix.wav`, use it in place of the narration track to hear the existing narration, ambient sound, and BGM mix. Share the whole directory. If its path changes, relink the video and narration files from the new directory.
 
 Before handing off a bundle, verify the import in the receiving editor. Check clip length, frame rate, narration and caption alignment, and media relinking after moving the bundle.
+
+### 10.7 Fine-tune via CLI (`reachreel tune`)
+
+Without manually editing `script.json`, use `reachreel tune` to adjust individual narration segments or define a lightweight non-destructive source video cut list (`cuts.json`, preserving VLM cache):
+
+```bash
+# Fine-tune segment 3: text, voice, locked start time, gain, and rerun downstream stages
+reachreel tune output/my-job \
+  --segment 3 \
+  --text "He checked the timer and dialed the grind one notch finer." \
+  --voice Serena --speed 1.05 --start 14.5 --gain-db 1.5 \
+  --apply
+
+# Disable segment 6, or restore automatic timing for segment 3
+reachreel tune output/my-job --segment 6 --disable --apply
+reachreel tune output/my-job --segment 3 --start auto --apply
+
+# Lightweight source hard cuts: remove 0-2.0s and 34.5-41.0s (or --keep / --reset-cuts)
+reachreel tune output/my-job --cut 0-2.0,34.5-41.0 --apply
+reachreel tune output/my-job --keep 2.0-34.5,41.0-88.0 --apply
+reachreel tune output/my-job --reset-cuts --apply
+
+# Undo the previous fine-tuning edit (restores script.json and cuts.json from .history/)
+reachreel tune output/my-job --undo --apply
+```
+
+Global subtitle layout and audio mix settings stay on the existing stage commands (`subtitle`, `mix`, `render`) and `reachreel resume output/my-job --subtitle-size 52 --bgm-volume 0.14`, keeping `tune` strictly focused on local segment and cut-list edits.
+
+### 10.8 Import edited artifacts and NLE timelines (`reachreel import`)
+
+Import externally edited scripts, SRT subtitles, custom voiceovers, cut lists, or NLE XML timelines back into a work directory and rerun only the affected downstream stages:
+
+```bash
+# Import a polished SRT file (reruns render and qa only; narration and mix stay untouched)
+reachreel import output/my-job --subtitles /path/to/edited.srt --resume
+
+# Import edited script.json / script.md, per-segment or full narration audio, or a new BGM
+reachreel import output/my-job --script /path/to/script.md --resume
+reachreel import output/my-job --segment-audio 1=/path/to/line1.wav --resume
+reachreel import output/my-job --narration /path/to/voiceover.wav --resume
+reachreel import output/my-job --bgm /path/to/new-bgm.mp3 --resume
+
+# Round-trip an edited Premiere / DaVinci Resolve (.xml) or Final Cut Pro (.fcpxml) timeline
+reachreel import output/my-job --timeline /path/to/edited.fcpxml --dry-run
+reachreel import output/my-job --timeline /path/to/edited.fcpxml --resume
+```
+
+Timeline imports extract hard cuts from the primary video track into `cuts.json`, map moved or deleted segment clips back to `start_override` and `enabled` in `script.json`, and warn explicitly when unsupported NLE transitions or speed ramps are detected.
+
+### 10.9 Local visual fine-tuning panel (`reachreel serve`)
+
+To fine-tune interactively in a browser without leaving ReachReel, launch the local studio server (zero extra dependencies, bound to `127.0.0.1` with per-session token auth):
+
+```bash
+# Scan output/ and open the studio panel in your default browser
+reachreel serve --open
+
+# Or open a specific job work directory directly
+reachreel serve output/my-job --port 8760 --open
+```
+
+The browser panel shares the exact same `Pipeline` methods and work directory files as the CLI, providing:
+- Final output / source video playback toggle with live subtitle overlay preview;
+- Interactive timeline with horizontal drag-to-lock narration segments (`start_override`), split/delete source hard-cut clips (`cuts.json`), and clickable scene keyframe thumbnails;
+- Inspector tabs for per-segment text/voice/speed/instruction/gain editing, instant single-segment audition and custom audio upload, SRT cue & global style editing, mix sliders, file/NLE XML import (with dry-run preview), and NLE bundle export;
+- One-click undo (`.history/`) and minimal downstream stage rerun with live SSE logs and QA results.
 
 ---
 

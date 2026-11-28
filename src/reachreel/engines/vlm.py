@@ -288,7 +288,11 @@ def analyze_scenes(
 
     if pending:
         client = OllamaClient(base_url, model)
-        LOG.info("Analyzing %d scenes with the local VLM (%s)...", len(pending), model)
+        LOG.info(
+            "Analyzing %d scenes with the local VLM (%s); first request may take 15-30s while the model loads...",
+            len(pending),
+            model,
+        )
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             futures = {
                 pool.submit(

@@ -25,12 +25,13 @@ NARRATION_STAGES = ("vlm", "tts")
 RENDER_STAGES = (*NARRATION_STAGES, "subtitles", "mix")
 
 _INPUT_FILES = {
-    "tts": ("script.json", "scenes.json"),
+    "tts": ("script.json", "scenes.json", "cuts.json"),
     "subtitles": ("narration.wav", "timeline.json"),
-    "mix": ("narration.wav",),
-    "render": ("mix.wav", "subtitles.srt", "timeline.json"),
+    "mix": ("narration.wav", "cuts.json"),
+    "render": ("mix.wav", "subtitles.srt", "timeline.json", "cuts.json"),
 }
 _SOURCE_STAGES = {"vlm", "tts", "mix", "render"}
+_CUTS_STAGES = {"tts", "mix", "render"}
 
 
 class StageInputs:
@@ -51,7 +52,9 @@ class StageInputs:
         for name in _INPUT_FILES.get(stage, ()):
             path = self.workdir / name
             key = self._artifact_key(path)
-            if key is not None:
+            if name == "cuts.json":
+                keys[name] = key or ""
+            elif key is not None:
                 keys[name] = key
         if stage in _SOURCE_STAGES and (source := self.source_key()) is not None:
             keys["source"] = source
@@ -80,6 +83,8 @@ class StageInputs:
             # record and capture the additional fields when the stage runs next.
             if any(current.get(name) != key for name, key in saved.items()):
                 return stage
+            if stage in _CUTS_STAGES and "cuts.json" not in saved and current.get("cuts.json"):
+                return stage
         return None
 
     def _legacy_inputs_changed(self, manifest: dict[str, Any], stage: str) -> bool:
@@ -92,7 +97,12 @@ class StageInputs:
                 if previous:
                     return (self.source_key() or "").partition(":")[2] != previous
         if stage == "render":
-            output = Path(manifest.get("output") or self.workdir / STAGE_ARTIFACTS["render"])
+            recorded_out = manifest.get("output")
+            output = Path(recorded_out) if recorded_out else self.workdir / STAGE_ARTIFACTS["render"]
+            if not output.is_file():
+                fallback_out = self.workdir / STAGE_ARTIFACTS["render"]
+                if fallback_out.is_file():
+                    output = fallback_out
             if output.is_file():
                 rendered_at = output.stat().st_mtime_ns
                 return any(

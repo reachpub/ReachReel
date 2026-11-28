@@ -16,12 +16,14 @@ from ..core.config import public_ollama_url
 from ..core.util import (
     LOG,
     atomic_write_json,
+    ffmpeg_bin,
     ffmpeg_filters,
     ffmpeg_full,
     ffprobe_json,
     read_json,
     run,
 )
+from ..domain.cuts import load_cuts
 from ..domain.models import QualityFlag, merge_quality_flags
 from ..i18n import t
 from ..languages import PROFILES, profile_for
@@ -181,7 +183,7 @@ def parse_srt(path: Path) -> list[dict[str, Any]]:
 def _loudness(path: Path) -> dict[str, Any] | None:
     proc = run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostats",
             "-i",
@@ -213,7 +215,7 @@ def _black_intervals(
 ) -> list[tuple[float, float]]:
     proc = run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-i",
@@ -244,7 +246,7 @@ def _freeze_intervals(
 ) -> list[tuple[float, float]]:
     proc = run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-i",
@@ -276,7 +278,7 @@ def _motion_score(path: Path, start: float, end: float, *, sample_seconds: float
     length = min(max(0.4, end - start - 0.2), sample_seconds)
     proc = run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostats",
             "-nostdin",
@@ -321,7 +323,7 @@ def _parse_astats(text: str) -> dict[str, float]:
 def _audio_stats(path: Path) -> dict[str, float] | None:
     proc = run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostats",
             "-nostdin",
@@ -572,6 +574,49 @@ def _add(checks: list[Check], check_id: str, status: str, message: str, **detail
     checks.append(Check(id=check_id, status=status, message=message, details=details))
 
 
+def _resolve_workdir_file(
+    workdir: Path,
+    recorded: str | None,
+    default_name: str,
+    *,
+    prefer_workdir: bool = True,
+) -> Path:
+    """Resolve an artifact path recorded in manifest, tolerating moved/copied workdirs."""
+    raw = str(recorded or "").strip()
+    if not raw:
+        return workdir / default_name
+    candidate = Path(raw)
+    if prefer_workdir:
+        if not candidate.is_absolute():
+            inside = workdir / candidate
+            if inside.exists():
+                return inside
+            fallback = workdir / default_name
+            return fallback if fallback.exists() else inside
+        if candidate.resolve(strict=False).is_relative_to(workdir) and candidate.exists():
+            return candidate
+        relocated = workdir / candidate.name
+        if relocated.exists():
+            return relocated
+        fallback = workdir / default_name
+        if fallback.exists():
+            return fallback
+        return candidate
+    if candidate.exists():
+        return candidate
+    if not candidate.is_absolute():
+        inside = workdir / candidate
+        if inside.exists():
+            return inside
+    relocated = workdir / candidate.name
+    if relocated.exists():
+        return relocated
+    fallback = workdir / default_name
+    if fallback.exists():
+        return fallback
+    return candidate
+
+
 def run_qa(
     workdir: Path,
     *,
@@ -584,7 +629,9 @@ def run_qa(
     pipeline_settings = manifest.get("settings_snapshot", {}) or {}
     settings = {**pipeline_settings, **render_settings, **(settings_override or {})}
     thresholds = QAThresholds.from_settings(settings)
-    output = Path(manifest.get("output") or workdir / "final.mp4")
+    output = _resolve_workdir_file(
+        workdir, manifest.get("output"), "final.mp4", prefer_workdir=True
+    )
     checks: list[Check] = []
 
     if not output.exists():
@@ -639,9 +686,15 @@ def run_qa(
             channels=audio_stream.get("channels"),
         )
 
+    cuts = None
+    try:
+        cuts = load_cuts(workdir / "cuts.json")
+    except (ValueError, TypeError):
+        cuts = None
     source_duration = float(manifest.get("video", {}).get("duration") or 0.0)
-    if source_duration > 0 and out_duration > 0:
-        delta = abs(out_duration - source_duration)
+    expected_duration = cuts.edited_duration if cuts is not None else source_duration
+    if expected_duration > 0 and out_duration > 0:
+        delta = abs(out_duration - expected_duration)
         status = (
             PASS
             if delta <= thresholds.duration_warn_seconds
@@ -653,10 +706,11 @@ def run_qa(
             checks,
             "duration_match",
             status,
-            t("qa.duration", output=out_duration, source=source_duration, delta=delta),
+            t("qa.duration", output=out_duration, source=expected_duration, delta=delta),
             output=round(out_duration, 3),
-            source=round(source_duration, 3),
+            source=round(expected_duration, 3),
             delta=round(delta, 3),
+            cuts_applied=cuts is not None,
         )
 
     if video_stream and audio_stream:
@@ -827,14 +881,19 @@ def run_qa(
                 end,
                 sample_seconds=thresholds.freeze_sample_seconds,
             )
+            source_span = (
+                cuts.output_interval_to_source(start, end)
+                if cuts is not None
+                else (start, end)
+            )
             source_motion = (
                 _motion_score(
                     source_video,
-                    start,
-                    end,
+                    source_span[0],
+                    source_span[1],
                     sample_seconds=thresholds.freeze_sample_seconds,
                 )
-                if source_available
+                if source_available and source_span is not None
                 else None
             )
             # A static source shot is legitimate content. A real render/encode
@@ -1019,7 +1078,8 @@ def run_qa(
                 )
 
     timeline = read_json(workdir / "timeline.json", {}) or {}
-    segments = timeline.get("segments", []) or []
+    raw_segments = timeline.get("segments", []) or []
+    segments = [seg for seg in raw_segments if isinstance(seg, dict) and seg.get("enabled", True)]
     if segments:
         max_speed = max(float(seg.get("tts_speed") or 1.0) for seg in segments)
         max_allowed = float(settings.get("max_speedup", 1.32)) + 0.02
@@ -1086,7 +1146,9 @@ def run_qa(
 
     bgm = manifest.get("bgm_source") or manifest.get("settings", {}).get("bgm")
     if bgm:
-        bgm_path = Path(bgm)
+        bgm_path = _resolve_workdir_file(
+            workdir, str(bgm), "bgm_loop.wav", prefer_workdir=False
+        )
         _add(
             checks,
             "bgm",

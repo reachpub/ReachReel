@@ -2,6 +2,28 @@
 
 # Changelog
 
+## [0.6.0] - 2026-11-28
+
+### Added
+
+- Local browser fine-tuning studio via `reachreel serve [workdir] [--port 8760] [--open]`, providing a dark-mode interactive timeline (draggable narration segment `start_override`, split/delete source hard cuts, clickable scene thumbnails), live subtitle preview overlay, per-segment audition and audio upload, SRT/mix/import/export inspector, `.history/` undo, HTTP Range media streaming, per-session token auth, and SSE live logs backed by the shared `Pipeline`.
+- In-app fine-tuning via `reachreel tune <workdir>` (per-segment text, voice, speed, delivery instruction, locked `start_override`, `gain_db`, `--enable`/`--disable`, `--clear-audio-override`, lightweight non-destructive source video hard cuts in `cuts.json` via `--cut`/`--keep`/`--reset-cuts`, and `.history/` `--undo`), plus `--subtitle-*` layout overrides on `reachreel resume`.
+- `reachreel import <workdir>` to validate and import edited scripts (`script.json`/`script.md`), SRT subtitles, full or per-segment narration audio (`--narration`, `--segment-audio ID=PATH`), replacement BGM, `cuts.json`, and round-tripped FCP7 XML / FCPXML timelines (`--timeline`), paired with `reachreel export --narration-mode segments`.
+- `install.sh` interactive installer and initializer with an ASCII `ReachReel` banner, step progress bar, spinner, RAM-based model recommendation, `config.toml` generation, and post-install `reachreel doctor` check.
+- `reachreel resume <workdir>` resumes all remaining or stale stages in one command without re-specifying the source video path, and `status` reports both `pending_stages` and `resume_command`.
+- `reachreel voices` now shows gender/tone traits and supports `--preview <voice>` to synthesize and audition voices directly.
+- `reachreel export` now exports separate `bgm.wav` and `ambient.wav` audio stems, adds multi-track audio and scene-cut markers to `timeline.xml` and `timeline.fcpxml`, and supports `--force` overwrite and `--json`.
+- Grouped `reachreel run --help` sections, `--json` across all subcommands, `--crf` on `run`, `--max-speedup` on `tts`, and audio mix CLI flags (`--bgm-volume`, `--bgm-duck-db`, `--ambient-volume`, `--ambient-duck-db`, `--target-lufs`) on `run`, `resume`, and `mix`.
+- `reachreel status <workdir> [--json]` inspects an existing work directory and reports per-stage state (`ok`, `stale`, `missing`), manual script edits, existing artifacts, QA status, `quality_flags`, and the next actionable command.
+- `reachreel run ... --json` prints a machine-readable JSON execution plan (`--dry-run --json`) or execution summary (including `workdir`, artifacts, QA report, and `next_command`) without mixing human-readable QA tables into stdout.
+- Agent Skill bundle under `skills/reachreel/` (`SKILL.md` and `references/`) for OpenAI Codex, Claude Code, and other Agent Skills-compatible harnesses.
+
+### Fixed
+
+- Guarded stdout during `--json` runs and model calls so third-party prints (such as Kokoro pipeline startup messages) never corrupt JSON output, and made `run --only ...,render,qa` return `final.mp4` as `output`.
+- Unified `ffmpeg` and `ffprobe` discovery (`ffmpeg_bin()` / `ffprobe_bin()`) to find Homebrew's keg-only `ffmpeg-full/bin` automatically, and added actionable fix hints and CJK-aligned columns to `reachreel doctor`.
+- Made `reachreel qa` tolerate relocated or renamed work directories by resolving missing absolute manifest paths against the current workdir, and allowed `script`, `tts`, and `subtitle` to run without the original source video file when metadata is saved.
+- Accepted global flags (`--lang`, `--verbose`, `--cache-dir`, `--no-cache`) both before and after subcommands, preferred local cached HuggingFace snapshots for offline runs, validated `workdir` existence in `licenses` and `qa`, and removed the misleading speed-up log during `--review-script` estimation.
 
 ## [0.5.0] - 2026-11-27
 

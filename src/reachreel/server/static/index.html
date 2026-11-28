@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ReachReel Studio</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="auth-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2 data-i18n="auth_title">Connect to ReachReel Studio</h2>
+      <p class="muted" data-i18n="auth_desc">Paste the session token printed by <code>reachreel serve</code> (or found in <code>~/.reachreel/token</code>).</p>
+      <input id="auth-token-input" type="password" placeholder="Session token..." />
+      <div class="modal-actions">
+        <button id="auth-submit-btn" class="btn primary" data-i18n="auth_connect">Connect</button>
+      </div>
+      <div id="auth-error" class="error-text"></div>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span>ReachReel Studio</span>
+      </div>
+      <select id="job-select" class="select job-select" aria-label="Select job"></select>
+      <button id="refresh-btn" class="btn ghost icon-btn" title="Refresh">↻</button>
+      <button id="reveal-btn" class="btn ghost" data-i18n="btn_reveal">Reveal</button>
+    </div>
+
+    <div class="topbar-center">
+      <div id="dirty-pill" class="pill ok">Up to date</div>
+      <div id="runtime-pill" class="pill hidden">Running...</div>
+    </div>
+
+    <div class="topbar-right">
+      <button id="undo-btn" class="btn ghost" disabled>
+        <span data-i18n="btn_undo">Undo</span>
+        <span id="undo-count" class="badge">0</span>
+      </button>
+      <select id="asr-select" class="select compact" title="ASR mode">
+        <option value="mlx-whisper">ASR: Whisper</option>
+        <option value="none">ASR: Timeline</option>
+      </select>
+      <button id="apply-btn" class="btn primary" data-i18n="btn_apply">Apply &amp; Render</button>
+      <button id="cancel-btn" class="btn danger hidden" data-i18n="btn_cancel">Cancel</button>
+      <button id="lang-btn" class="btn ghost compact">EN</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="stage-column">
+      <!-- Video Preview Stage -->
+      <div class="player-card">
+        <div class="player-header">
+          <div class="segmented">
+            <button id="mode-final-btn" class="seg-btn active" data-i18n="preview_final">Final Output</button>
+            <button id="mode-source-btn" class="seg-btn" data-i18n="preview_source">Source Video</button>
+          </div>
+          <div id="video-meta" class="muted mono small">--</div>
+        </div>
+        <div class="player-viewport">
+          <video id="video-player" playsinline preload="metadata"></video>
+          <div id="subtitle-overlay" class="subtitle-overlay style-outline"></div>
+          <div id="player-empty" class="player-empty hidden" data-i18n="player_empty">No video available yet. Run render or switch to Source Video.</div>
+        </div>
+        <div class="transport-bar">
+          <div class="transport-left">
+            <button id="play-btn" class="btn primary compact">▶</button>
+            <button id="step-back-btn" class="btn ghost compact">-1s</button>
+            <button id="step-fwd-btn" class="btn ghost compact">+1s</button>
+            <span id="timecode" class="mono">00:00.00 / 00:00.00</span>
+          </div>
+          <div class="transport-right">
+            <label class="checkbox-inline">
+              <input id="overlay-toggle" type="checkbox" checked />
+              <span data-i18n="live_sub_overlay">Live Subtitle Preview</span>
+            </label>
+            <select id="rate-select" class="select compact">
+              <option value="0.75">0.75x</option>
+              <option value="1" selected>1.0x</option>
+              <option value="1.25">1.25x</option>
+              <option value="1.5">1.5x</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Visual Lightweight Timeline -->
+      <div class="timeline-card">
+        <div class="timeline-toolbar">
+          <div class="timeline-title" data-i18n="timeline_title">Timeline</div>
+          <div class="timeline-actions">
+            <button id="split-cut-btn" class="btn ghost compact" data-i18n="btn_split_cut">Split at Playhead</button>
+            <button id="delete-cut-btn" class="btn ghost compact" data-i18n="btn_delete_cut" disabled>Delete Clip</button>
+            <button id="reset-cuts-btn" class="btn ghost compact" data-i18n="btn_reset_cuts">Reset Cuts</button>
+          </div>
+        </div>
+
+        <div id="timeline-scroll" class="timeline-scroll">
+          <div id="timeline-canvas" class="timeline-canvas">
+            <div id="playhead" class="playhead"></div>
+
+            <div class="track-row">
+              <div class="track-label" data-i18n="track_ruler">Time</div>
+              <div id="ruler-track" class="track-lane ruler-lane"></div>
+            </div>
+
+            <div class="track-row">
+              <div class="track-label" data-i18n="track_cuts">Video Cuts</div>
+              <div id="cuts-track" class="track-lane cuts-lane"></div>
+            </div>
+
+            <div class="track-row">
+              <div class="track-label" data-i18n="track_scenes">Scenes</div>
+              <div id="scenes-track" class="track-lane scenes-lane"></div>
+            </div>
+
+            <div class="track-row">
+              <div class="track-label" data-i18n="track_narration">Narration</div>
+              <div id="segments-track" class="track-lane segments-lane"></div>
+            </div>
+          </div>
+        </div>
+        <div class="timeline-hint muted small" data-i18n="timeline_hint">
+          Drag narration blocks horizontally to lock start time. Click ruler or scenes to seek.
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Inspector Panel -->
+    <aside class="inspector-column">
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="segment" data-i18n="tab_segment">Segment</button>
+        <button class="tab-btn" data-tab="subtitles" data-i18n="tab_subtitles">Subtitles</button>
+        <button class="tab-btn" data-tab="mix" data-i18n="tab_mix">Mix &amp; I/O</button>
+        <button class="tab-btn" data-tab="qa" data-i18n="tab_qa">QA &amp; Logs</button>
+      </nav>
+
+      <!-- Tab 1: Segment Inspector -->
+      <div id="tab-segment" class="tab-pane active">
+        <div id="segment-empty" class="muted pad" data-i18n="select_segment_hint">Select a narration segment on the timeline to fine-tune it.</div>
+        <div id="segment-editor" class="editor-form hidden">
+          <div class="section-header">
+            <h3 id="seg-heading">Segment #1</h3>
+            <label class="switch-inline">
+              <input id="seg-enabled" type="checkbox" checked />
+              <span data-i18n="seg_enabled">Enabled</span>
+            </label>
+          </div>
+
+          <label class="field">
+            <span data-i18n="seg_text">Narration Text</span>
+            <textarea id="seg-text" rows="3"></textarea>
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span data-i18n="seg_voice">Voice Override</span>
+              <select id="seg-voice" class="select"></select>
+            </label>
+            <label class="field">
+              <span data-i18n="seg_speed">Speed (0 = default)</span>
+              <input id="seg-speed" type="number" min="0" max="2" step="0.05" value="0" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span data-i18n="seg_instruct">Delivery Instruction (Qwen3)</span>
+            <input id="seg-instruct" type="text" placeholder="e.g. calm, conversational" />
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span data-i18n="seg_start">Start Override (s)</span>
+              <div class="inline-group">
+                <input id="seg-start" type="text" placeholder="auto" />
+                <button id="seg-start-playhead" class="btn ghost compact" title="Use current playhead">◎</button>
+                <button id="seg-start-auto" class="btn ghost compact" title="Reset to auto">Auto</button>
+              </div>
+            </label>
+            <label class="field">
+              <span data-i18n="seg_gain">Gain (dB): <strong id="seg-gain-val">0.0</strong></span>
+              <input id="seg-gain" type="range" min="-24" max="12" step="0.5" value="0" />
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button id="seg-save-btn" class="btn primary" data-i18n="btn_save_segment">Save Segment</button>
+            <button id="seg-audition-btn" class="btn secondary" data-i18n="btn_audition">Audition</button>
+          </div>
+
+          <div id="seg-audio-box" class="audio-box hidden">
+            <audio id="seg-audio-player" controls></audio>
+          </div>
+
+          <div class="divider"></div>
+          <div class="field">
+            <span data-i18n="seg_audio_override">Custom Segment Audio Override</span>
+            <div id="seg-override-status" class="muted small mono">None (using TTS)</div>
+            <div class="inline-group">
+              <input id="seg-audio-file" type="file" accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.opus" />
+              <button id="seg-upload-audio-btn" class="btn ghost compact" data-i18n="btn_upload">Upload</button>
+              <button id="seg-clear-audio-btn" class="btn ghost compact" data-i18n="btn_clear">Clear</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Subtitles Inspector -->
+      <div id="tab-subtitles" class="tab-pane">
+        <div class="editor-form">
+          <h4 data-i18n="sub_style_heading">Global Subtitle Style</h4>
+          <div class="field-grid">
+            <label class="field">
+              <span data-i18n="sub_size">Font Size (px)</span>
+              <input id="set-sub-size" type="number" min="16" max="120" step="2" />
+            </label>
+            <label class="field">
+              <span data-i18n="sub_preset">Safe Area Preset</span>
+              <select id="set-sub-preset" class="select">
+                <option value="">(Manual)</option>
+                <option value="douyin">douyin</option>
+                <option value="reels">reels</option>
+                <option value="shorts">shorts</option>
+                <option value="landscape">landscape</option>
+              </select>
+            </label>
+            <label class="field">
+              <span data-i18n="sub_render">Render Look</span>
+              <select id="set-sub-render" class="select">
+                <option value="outline">outline</option>
+                <option value="box">box</option>
+                <option value="none">none</option>
+              </select>
+            </label>
+            <label class="field">
+              <span data-i18n="sub_margin_v">Bottom Margin (px)</span>
+              <input id="set-sub-margin-v" type="number" min="0" max="600" step="10" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <label class="checkbox-inline">
+              <input id="set-burn-sub" type="checkbox" checked />
+              <span data-i18n="sub_burn">Burn Hard Subtitles</span>
+            </label>
+            <button id="save-sub-style-btn" class="btn secondary compact" data-i18n="btn_save_style">Save Style</button>
+          </div>
+
+          <div class="divider"></div>
+          <div class="section-header">
+            <h4 data-i18n="sub_cues_heading">Subtitle Cues (SRT)</h4>
+            <div class="inline-group">
+              <button id="add-cue-btn" class="btn ghost compact">+ Cue</button>
+              <button id="save-cues-btn" class="btn primary compact" data-i18n="btn_save_srt">Save SRT</button>
+            </div>
+          </div>
+          <div id="cues-list" class="cues-list"></div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Mix, Import & Export -->
+      <div id="tab-mix" class="tab-pane">
+        <div class="editor-form">
+          <h4 data-i18n="mix_heading">Audio Mix &amp; Ducking</h4>
+          <div class="field-grid">
+            <label class="field">
+              <span>BGM Volume</span>
+              <input id="set-bgm-vol" type="number" min="0" max="1" step="0.02" />
+            </label>
+            <label class="field">
+              <span>BGM Duck (dB)</span>
+              <input id="set-bgm-duck" type="number" min="-36" max="0" step="1" />
+            </label>
+            <label class="field">
+              <span>Ambient Volume</span>
+              <input id="set-amb-vol" type="number" min="0" max="1" step="0.02" />
+            </label>
+            <label class="field">
+              <span>Target LUFS</span>
+              <input id="set-lufs" type="number" min="-24" max="-6" step="0.5" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button id="save-mix-btn" class="btn secondary compact" data-i18n="btn_save_mix">Save Mix Settings</button>
+          </div>
+
+          <div class="divider"></div>
+          <h4 data-i18n="import_heading">Import Artifact / NLE Timeline</h4>
+          <div class="field-grid">
+            <label class="field">
+              <span data-i18n="import_kind">Import Type</span>
+              <select id="import-kind" class="select">
+                <option value="timeline">NLE XML / FCPXML</option>
+                <option value="subtitles">Subtitles (.srt)</option>
+                <option value="script">Script (script.json / .md)</option>
+                <option value="narration">Full Narration Audio</option>
+                <option value="bgm">Replacement BGM</option>
+                <option value="cuts">Cuts (cuts.json)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span data-i18n="import_file">Select File</span>
+              <input id="import-file" type="file" />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button id="import-dryrun-btn" class="btn ghost compact" data-i18n="btn_dry_run">Dry Run</button>
+            <button id="import-run-btn" class="btn primary compact" data-i18n="btn_import">Import</button>
+          </div>
+          <pre id="import-result" class="console-box hidden"></pre>
+
+          <div class="divider"></div>
+          <h4 data-i18n="export_heading">Export to External NLE</h4>
+          <div class="field-grid">
+            <label class="field">
+              <span>Format</span>
+              <select id="export-format" class="select">
+                <option value="mp4">H.264 MP4</option>
+                <option value="mov">ProRes 422 MOV</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Narration Mode</span>
+              <select id="export-mode" class="select">
+                <option value="segments" selected>segments (per-line clips)</option>
+                <option value="track">track (single narration.wav)</option>
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button id="export-btn" class="btn secondary compact" data-i18n="btn_export">Export Bundle</button>
+          </div>
+          <div id="export-status" class="muted small mono"></div>
+        </div>
+      </div>
+
+      <!-- Tab 4: QA & Live Logs -->
+      <div id="tab-qa" class="tab-pane">
+        <div class="editor-form">
+          <div class="section-header">
+            <h4 data-i18n="qa_heading">QA Gate</h4>
+            <span id="qa-summary-badge" class="pill">--</span>
+          </div>
+          <div id="qa-list" class="qa-list"></div>
+
+          <div class="divider"></div>
+          <h4 data-i18n="logs_heading">Live Pipeline Logs</h4>
+          <pre id="log-console" class="console-box tall"></pre>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

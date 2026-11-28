@@ -6,7 +6,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from ..core.config import Settings
-from ..core.util import ffmpeg_full, run
+from ..core.util import ffmpeg_bin, ffmpeg_full, run
+from ..domain.cuts import CutList
 
 LOG = logging.getLogger("reachreel.media.render")
 
@@ -78,6 +79,33 @@ def unscaled_source_warning(info, settings: Settings) -> str | None:
     )
 
 
+def video_cut_filter_graph(cuts: CutList, post_filters: list[str] | None = None) -> str:
+    """Build an FFmpeg ``filter_complex`` graph applying hard cuts to ``[0:v]`` -> ``[vout]``."""
+    tail = [item for item in (post_filters or []) if item]
+    if len(cuts.clips) == 1:
+        clip = cuts.clips[0]
+        chain = ",".join(
+            [f"trim=start={clip.start:.3f}:end={clip.end:.3f}", "setpts=PTS-STARTPTS", *tail]
+        )
+        return f"[0:v]{chain}[vout]"
+    count = len(cuts.clips)
+    splits = "".join(f"[v_s{idx}]" for idx in range(count))
+    parts = [f"[0:v]split={count}{splits}"]
+    concat_inputs: list[str] = []
+    for idx, clip in enumerate(cuts.clips):
+        parts.append(
+            f"[v_s{idx}]trim=start={clip.start:.3f}:end={clip.end:.3f},"
+            f"setpts=PTS-STARTPTS[v_c{idx}]"
+        )
+        concat_inputs.append(f"[v_c{idx}]")
+    if tail:
+        parts.append(f"{''.join(concat_inputs)}concat=n={count}:v=1:a=0[v_cat]")
+        parts.append(f"[v_cat]{','.join(tail)}[vout]")
+    else:
+        parts.append(f"{''.join(concat_inputs)}concat=n={count}:v=1:a=0[vout]")
+    return ";".join(parts)
+
+
 def render(
     *,
     video: Path,
@@ -86,6 +114,7 @@ def render(
     out: Path,
     settings: Settings,
     burn: bool = True,
+    cuts: CutList | None = None,
 ) -> bool:
     """Publish the render only after encoding succeeds."""
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -95,7 +124,7 @@ def render(
         generated_ass = staging / "subtitles.ass"
         burned = _render(
             video=video, audio=audio, subtitles=subtitles, out=movie, settings=settings,
-            burn=burn, generated_ass=generated_ass,
+            burn=burn, generated_ass=generated_ass, cuts=cuts,
         )
         if generated_ass.is_file():
             generated_ass.replace(subtitles.with_suffix(".ass"))
@@ -113,13 +142,14 @@ def _render(
     settings: Settings,
     burn: bool,
     generated_ass: Path,
+    cuts: CutList | None = None,
 ) -> bool:
     from ..core.util import ffprobe_duration
 
     if not video.exists():
         raise RuntimeError(f"Source video not found: {video}")
     duration = ffprobe_duration(audio)
-    ffmpeg = ffmpeg_full() if burn else "ffmpeg"
+    ffmpeg = ffmpeg_full() if burn else ffmpeg_bin()
     burned = bool(burn and ffmpeg and "subtitles" in _filters(ffmpeg))
     if burn and not burned:
         LOG.warning(
@@ -163,9 +193,14 @@ def _render(
         if settings.output_fps:
             vf_parts.append(f"fps={settings.output_fps:g}")
         vf_parts.append(f"subtitles=filename='{_escape_filter_path(ass_path)}'")
-        vf = ",".join(vf_parts)
+        if cuts is not None and cuts.clips:
+            filter_args = ["-filter_complex", video_cut_filter_graph(cuts, vf_parts)]
+            video_map = "[vout]"
+        else:
+            filter_args = ["-vf", ",".join(vf_parts)]
+            video_map = "0:v:0"
         cmd = [
-            str(ffmpeg or "ffmpeg"),
+            str(ffmpeg or ffmpeg_bin()),
             "-hide_banner",
             "-nostdin",
             "-loglevel",
@@ -175,10 +210,9 @@ def _render(
             str(video),
             "-i",
             str(audio),
-            "-vf",
-            vf,
+            *filter_args,
             "-map",
-            "0:v:0",
+            video_map,
             "-map",
             "1:a:0",
             "-c:v",
@@ -206,8 +240,14 @@ def _render(
             vf_parts.append(f"scale=-2:{settings.output_height}:flags=lanczos")
         if settings.output_fps:
             vf_parts.append(f"fps={settings.output_fps:g}")
+        if cuts is not None and cuts.clips:
+            filter_args = ["-filter_complex", video_cut_filter_graph(cuts, vf_parts)]
+            video_map = "[vout]"
+        else:
+            filter_args = ["-vf", ",".join(vf_parts)] if vf_parts else []
+            video_map = "0:v:0"
         cmd = [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-loglevel",
@@ -219,8 +259,9 @@ def _render(
             str(audio),
             "-i",
             str(subtitles),
+            *filter_args,
             "-map",
-            "0:v:0",
+            video_map,
             "-map",
             "1:a:0",
             "-map",
@@ -247,8 +288,6 @@ def _render(
             "+faststart",
             str(out),
         ]
-        if vf_parts:
-            cmd[cmd.index("-map"):cmd.index("-map")] = ["-vf", ",".join(vf_parts)]
 
     run(cmd, timeout=3600)
     return burned

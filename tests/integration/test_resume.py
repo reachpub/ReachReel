@@ -11,13 +11,22 @@ from pathlib import Path
 from unittest.mock import patch
 
 from reachreel.cli.main import main
-from reachreel.core.util import atomic_write_json, ffprobe_json, read_json, run, sha1_file
+from reachreel.core.util import (
+    atomic_write_json,
+    ffmpeg_bin,
+    ffprobe_json,
+    find_ffmpeg,
+    find_ffprobe,
+    read_json,
+    run,
+    sha1_file,
+)
 from reachreel.domain.models import NarrationSegment
 from reachreel.i18n import current_language, set_language
 
 
 @unittest.skipUnless(os.environ.get("REACHREEL_INTEGRATION") == "1", "set REACHREEL_INTEGRATION=1")
-@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
+@unittest.skipUnless(find_ffmpeg() and find_ffprobe(), "FFmpeg is required")
 class ResumeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -29,7 +38,7 @@ class ResumeTest(unittest.TestCase):
         cls.revised_voice = cls.root / "revised.wav"
         run(
             [
-                "ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                ffmpeg_bin(), "-v", "error", "-f", "lavfi", "-i",
                 "testsrc2=size=320x180:rate=24:duration=6",
                 "-c:v", "libx264", "-preset", "ultrafast", cls.source,
             ],
@@ -37,7 +46,7 @@ class ResumeTest(unittest.TestCase):
         )
         run(
             [
-                "ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                ffmpeg_bin(), "-v", "error", "-f", "lavfi", "-i",
                 "sine=frequency=500:sample_rate=48000:duration=3", "-c:a", "pcm_s16le",
                 cls.revised_voice,
             ],
@@ -45,7 +54,7 @@ class ResumeTest(unittest.TestCase):
         )
         run(
             [
-                "ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                ffmpeg_bin(), "-v", "error", "-f", "lavfi", "-i",
                 "sine=sample_rate=48000:duration=3", "-c:a", "pcm_s16le", cls.voice,
             ],
             timeout=30,
@@ -197,7 +206,7 @@ class ResumeTest(unittest.TestCase):
         self._render_job()
         run(
             [
-                "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                ffmpeg_bin(), "-v", "error", "-y", "-f", "lavfi", "-i",
                 "testsrc2=size=320x180:rate=24:duration=1", "-c:v", "libx264", self.source,
             ],
             timeout=30,

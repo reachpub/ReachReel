@@ -1,5 +1,6 @@
 .venv/
 .envrc
+config.toml
 __pycache__/
 dist/
 build/

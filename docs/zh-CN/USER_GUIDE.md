@@ -262,11 +262,11 @@ reachreel run VIDEO [options]
 | `--out DIR` | `output` | 工作目录根；仅在未指定 `--workdir` 时生效 |
 | `--config FILE` | 无 | TOML 配置文件 |
 | `--bgm FILE` | 随机 | 指定 BGM 文件 |
-| `--bgm-dir DIR` | `bgm` | BGM 目录 |
+| `--bgm-dir DIR` | `inputs/bgm` | BGM 目录 |
 | `--bgm-fade N` | `2.0` | BGM 结尾淡出秒数 |
 | `--no-bgm` | 关 | 不混 BGM |
-| `--voice NAME` | 跟随语言 | Kokoro 音色（`zf_xiaoxiao`、`af_heart`、`bf_emma` 等） |
-| `--tts ENGINE` | `kokoro` | `kokoro` 或 `say`（调试用） |
+| `--voice NAME` | 跟随语言 | 内置音色（`zf_xiaoxiao`、`af_heart`、`Serena`、`Ryan` 等）；可用 `reachreel voices --preview <音色名>` 试听 |
+| `--tts ENGINE` | `kokoro` | `kokoro`、`qwen3` 或 `say`（调试用） |
 | `--tts-language TAG` | 跟随成片语言 | 配音语言，BCP 47 标签（`zh-CN`、`en-US`、`en-GB`），音色必须与之一致 |
 | `--vlm-model NAME` | `qwen3-vl:8b-instruct` | 画面理解模型 |
 | `--llm-model NAME` | `qwen3:30b-instruct` | 写稿模型 |
@@ -297,6 +297,7 @@ reachreel run VIDEO [options]
 | `--only STAGES` | 全部 | 只运行指定阶段，逗号分隔，如 `vlm,script` |
 | `--dry-run` | 关 | 只打印将要运行的阶段和缓存状态，不调用模型、不写文件 |
 | `--review-script` | 关 | 跑到脚本阶段停下，输出 `script.md` 供人工确认 |
+| `--json` | 关 | 向标准输出打印机器可读的 JSON 计划（`--dry-run`）或执行摘要（含 `workdir`、产物路径、QA 报告与 `next_command`） |
 | `--force` | 关 | 重新生成选中的阶段，跳过工作目录缓存和共享缓存的读取 |
 | `--no-resume` | 关 | 不复用场景/解说，但保留 VLM/TTS 缓存 |
 | `--verbose` | 关 | 调试日志 |
@@ -315,11 +316,10 @@ reachreel run video.mp4 --workdir output/xxx --only vlm,script
 # 只重做字幕和成片
 reachreel run video.mp4 --workdir output/xxx --only subtitles,mix,render
 
-# 先出脚本，人工确认 script.md 后继续
+# 先出脚本，人工确认 script.md 后一键续跑
 reachreel run video.mp4 --workdir output/xxx --review-script
 # 编辑 output/xxx/script.json 后：
-reachreel tts output/xxx
-reachreel subtitle output/xxx && reachreel mix output/xxx && reachreel render output/xxx
+reachreel resume output/xxx
 
 # 英文旁白、配音与字幕（需先装 tts-en extra 与 en_core_web_sm）
 reachreel run video.mp4 --content-language en --height 1080 --fps 30
@@ -487,6 +487,17 @@ reachreel --cache-dir /tmp/rr-cache run video.mp4
 ```
 
 字幕可用 `--subtitle-preset douyin|reels|shorts|landscape`（或配置里的 `subtitle_preset`）套用平台安全区，预设会覆盖手动边距。
+
+### 7.9 `reachreel status`
+
+检查已有工作目录的各阶段状态（`ok` 已完成、`stale` 输入已变需重跑、`missing` 缺失）、`script.json` 是否被手动编辑、最新 QA 状态，以及下一步可执行命令：
+
+```bash
+reachreel status output/xxx
+reachreel status output/xxx --json
+```
+
+加 `--json` 会输出机器可读的结构化报告（包含 `complete`、`video`、`settings`、`script_edited`、`stages`、`artifacts`、`quality_flags`、`qa`、`next_stage` 与 `next_command`），适合脚本集成或让 Codex 等 AI Agent 接续与排查已有任务。
 
 ---
 
@@ -702,9 +713,10 @@ reachreel qa output/xxx
 reachreel export output/my-job
 reachreel export output/my-job --format mov --out output/my-job-prores
 reachreel export output/my-job --fps 30 --out output/my-job-30fps
+reachreel export output/my-job --narration-mode segments --out output/my-job-segs
 ```
 
-默认导出到 `output/my-job/edit`。再次导出时，用 `--out` 指定一个新目录。MP4 使用 H.264 和 AAC。MOV 使用 ProRes 422 和 PCM。两种视频均不压制 ReachReel 字幕，并按工作目录的设置处理输出高度和帧率，生成恒定帧率视频。已有完整混音时，视频带完整混音。尚未混音时，视频带旁白。
+默认导出到 `output/my-job/edit`。再次导出时，用 `--out` 指定一个新目录。MP4 使用 H.264 和 AAC。MOV 使用 ProRes 422 和 PCM。两种视频均不压制 ReachReel 字幕，并按工作目录的设置处理输出高度和帧率，生成恒定帧率视频。已有完整混音时，视频带完整混音。尚未混音时，视频带旁白。加上 `--narration-mode segments` 会按旁白段把独立切片导出到 `segments/seg_*.wav`，方便在剪辑软件里拖动单句位置后再通过 `reachreel import --timeline` 回导。
 
 剪辑素材包支持整数帧率及标准分数帧率 23.976、29.97、59.94 和 119.88 fps。遇到其他帧率时，可用 `--fps` 指定支持的导出帧率，工作目录中的设置继续用于其他命令。
 
@@ -717,6 +729,72 @@ reachreel export output/my-job --fps 30 --out output/my-job-30fps
 XML 时间线使用视频画面，并将 `narration.wav` 放在独立轨道上。单独导入 `subtitles.srt` 即可编辑字幕。如果素材包内有 `mix.wav`，可用它替换旁白轨，保留已有的旁白、原声与 BGM 混音。交付时请传整个目录。如果移动了目录，在剪辑软件中重新链接新目录下的视频和旁白文件。
 
 交付前在接收方使用的剪辑软件中验证导入。核对片段时长、帧率、旁白和字幕的对齐，以及移动素材包后能否重新链接素材。
+
+### 10.7 命令行精细微调（`reachreel tune`）
+
+无需手改 `script.json`，可以用 `reachreel tune` 对单个旁白段做精细微调，或对源片做非破坏性硬切裁剪（写入 `cuts.json`，复用已有 VLM 缓存）：
+
+```bash
+# 微调第 3 段旁白：改文案、换音色、锁定出现时间、调节单段音量并自动重跑下游
+reachreel tune output/my-job \
+  --segment 3 \
+  --text "他看了眼计时器，把研磨调细了一格。" \
+  --voice Serena --speed 1.05 --start 14.5 --gain-db 1.5 \
+  --apply
+
+# 禁用第 6 段，或恢复某段自动落点
+reachreel tune output/my-job --segment 6 --disable --apply
+reachreel tune output/my-job --segment 3 --start auto --apply
+
+# 轻量源片裁剪：删除 0-2.0s 和 34.5-41.0s（或用 --keep 指定保留区间，--reset-cuts 恢复原片）
+reachreel tune output/my-job --cut 0-2.0,34.5-41.0 --apply
+reachreel tune output/my-job --keep 2.0-34.5,41.0-88.0 --apply
+reachreel tune output/my-job --reset-cuts --apply
+
+# 撤销上一次微调（从 .history/ 恢复 script.json 与 cuts.json）
+reachreel tune output/my-job --undo --apply
+```
+
+全局字幕样式与混音参数仍走现有阶段命令（`subtitle` / `mix` / `render`）或 `reachreel resume output/my-job --subtitle-size 52 --bgm-volume 0.14`，与 `tune` 职责完全不重叠。
+
+### 10.8 导回外部微调产物与剪辑时间线（`reachreel import`）
+
+在外部改好脚本、SRT 字幕、真人配音或剪辑软件时间线后，可以直接导入工作目录并只重跑受影响的下游阶段：
+
+```bash
+# 导入精修后的 SRT 字幕（仅重跑 render 和 qa，不重跑 TTS/混音）
+reachreel import output/my-job --subtitles /path/to/edited.srt --resume
+
+# 导入编辑后的 script.json / script.md、替换单段配音或整轨旁白、替换 BGM
+reachreel import output/my-job --script /path/to/script.md --resume
+reachreel import output/my-job --segment-audio 1=/path/to/line1.wav --resume
+reachreel import output/my-job --narration /path/to/voiceover.wav --resume
+reachreel import output/my-job --bgm /path/to/new-bgm.mp3 --resume
+
+# 从 Premiere / DaVinci Resolve (.xml) 或 Final Cut Pro (.fcpxml) 导回时间线
+reachreel import output/my-job --timeline /path/to/edited.fcpxml --dry-run
+reachreel import output/my-job --timeline /path/to/edited.fcpxml --resume
+```
+
+导入 XML/FCPXML 时，主视频轨的硬切会写入 `cuts.json`，按段导出的旁白切片位置与删减会同步到 `script.json` 的 `start_override` / `enabled`，检测到不支持的转场或变速特效时会明确发出警告。
+
+### 10.9 本地可视化微调面板（`reachreel serve`）
+
+如果想在浏览器里像轻量视频编辑台一样直观微调，直接启动本地微调服务（无需额外依赖，默认只监听 `127.0.0.1` 并自动校验会话 Token）：
+
+```bash
+# 打开整个 output/ 目录并在浏览器中自动启动面板
+reachreel serve --open
+
+# 或直接定位到某一条任务目录
+reachreel serve output/my-job --port 8760 --open
+```
+
+面板底层与 CLI 共享同一套 `Pipeline` 与工作目录文件，支持：
+- 成片 / 原片切换播放 + 实时字幕样式叠加预览；
+- 时间轴上直接拖动旁白段锁定入点（`start_override`）、在播放头切分/删除源片硬切片段（`cuts.json`）、点击镜头缩略图跳转画面；
+- 检视器中编辑单段文案/音色/语速/语气/增益、单段即时试听与上传替换音频、编辑 SRT 字幕与全局样式、调节混音滑杆、导入外部文件或 NLE XML/FCPXML、导出 NLE 素材包；
+- 一键撤销（`.history/`）与仅重跑受影响的下游阶段（通过 SSE 实时查看日志与 QA 报告）。
 
 ---
 

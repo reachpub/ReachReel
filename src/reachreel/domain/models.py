@@ -102,6 +102,10 @@ class NarrationSegment:
     instruct: str = ""
     voice: str = ""
     speed: float = 0.0
+    start_override: float | None = None
+    gain_db: float = 0.0
+    audio_override: str = ""
+    enabled: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -111,6 +115,14 @@ class NarrationSegment:
             data.pop("voice", None)
         if self.speed <= 0:
             data.pop("speed", None)
+        if self.start_override is None:
+            data.pop("start_override", None)
+        if abs(self.gain_db) < 1e-6:
+            data.pop("gain_db", None)
+        if not self.audio_override:
+            data.pop("audio_override", None)
+        if self.enabled:
+            data.pop("enabled", None)
         return data
 
 

@@ -1,10 +1,12 @@
 """Local text-to-speech: Kokoro-82M and Qwen3-TTS via MLX, with a macOS `say` fallback."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import logging
 import re
 import shutil
+import sys
 import time
 import wave
 from pathlib import Path
@@ -12,7 +14,7 @@ from tempfile import TemporaryDirectory
 from typing import Any
 
 from ..core.config import Settings
-from ..core.util import clamp, run, sha1_file
+from ..core.util import clamp, ffmpeg_bin, local_hf_model, run, sha1_file
 from ..domain.models import NarrationSegment, QualityFlag
 from ..languages import (
     LanguageProfile,
@@ -83,6 +85,55 @@ QWEN3_EN_VOICES = [
     "Ryan",
     "Aiden",
 ]
+
+# Concise voice traits for discovery (`reachreel voices` and `--json`).
+VOICE_METADATA: dict[str, dict[str, str]] = {
+    # Kokoro zh-CN
+    "zf_xiaoxiao": {"gender": "female", "tone": "clear, natural (default)"},
+    "zf_xiaobei": {"gender": "female", "tone": "bright, energetic"},
+    "zf_xiaoni": {"gender": "female", "tone": "warm, gentle"},
+    "zf_xiaoyi": {"gender": "female", "tone": "calm, narrative"},
+    "zm_yunjian": {"gender": "male", "tone": "steady, commentary"},
+    "zm_yunxi": {"gender": "male", "tone": "youthful, casual"},
+    "zm_yunxia": {"gender": "male", "tone": "light, lively"},
+    "zm_yunyang": {"gender": "male", "tone": "deep, documentary"},
+    # Kokoro en-US
+    "af_heart": {"gender": "female", "tone": "warm, expressive (default)"},
+    "af_bella": {"gender": "female", "tone": "friendly, smooth"},
+    "af_nicole": {"gender": "female", "tone": "soft, intimate"},
+    "af_nova": {"gender": "female", "tone": "crisp, modern"},
+    "af_sarah": {"gender": "female", "tone": "clear, balanced"},
+    "af_sky": {"gender": "female", "tone": "bright, casual"},
+    "am_adam": {"gender": "male", "tone": "deep, documentary"},
+    "am_michael": {"gender": "male", "tone": "steady, conversational"},
+    "am_liam": {"gender": "male", "tone": "natural, relaxed"},
+    "am_onyx": {"gender": "male", "tone": "resonant, dramatic"},
+    # Kokoro en-GB
+    "bf_emma": {"gender": "female", "tone": "clear, poised (default)"},
+    "bf_alice": {"gender": "female", "tone": "warm, narrative"},
+    "bf_lily": {"gender": "female", "tone": "gentle, storytelling"},
+    "bm_daniel": {"gender": "male", "tone": "measured, documentary"},
+    "bm_george": {"gender": "male", "tone": "classic, calm"},
+    "bm_lewis": {"gender": "male", "tone": "friendly, conversational"},
+    # Qwen3-TTS
+    "Serena": {"gender": "female", "tone": "warm, natural (default zh)"},
+    "Vivian": {"gender": "female", "tone": "bright, expressive"},
+    "Uncle_Fu": {"gender": "male", "tone": "mature, mellow storyteller"},
+    "Dylan": {"gender": "male", "tone": "relaxed, Beijing casual"},
+    "Eric": {"gender": "male", "tone": "lively, Sichuan casual"},
+    "Ryan": {"gender": "male", "tone": "clear, energetic (default en)"},
+    "Aiden": {"gender": "male", "tone": "sunny, conversational"},
+}
+
+
+def voice_metadata(name: str) -> dict[str, str]:
+    """Return gender and tone hints for a built-in voice."""
+    if name in VOICE_METADATA:
+        return dict(VOICE_METADATA[name])
+    lower = name.lower()
+    if len(lower) >= 3 and lower[2] == "_" and lower[1] in {"f", "m"}:
+        return {"gender": "female" if lower[1] == "f" else "male", "tone": "built-in"}
+    return {"gender": "unknown", "tone": "built-in"}
 
 
 def _pack_whitespace_pieces(pieces: list[str], limit: int) -> list[str]:
@@ -222,7 +273,7 @@ def _finalize_tts_wav(
 ) -> float:
     """Normalize a raw TTS output file to 48 kHz mono PCM WAV with optional audio tuning."""
     cmd: list[str] = [
-        "ffmpeg",
+        ffmpeg_bin(),
         "-hide_banner",
         "-nostdin",
         "-loglevel",
@@ -350,7 +401,9 @@ class KokoroEngine:
                 "mlx-audio is not installed. Run: uv pip install mlx-audio 'misaki[zh]'"
             ) from exc
         LOG.info("Loading Kokoro model %s ...", self.settings.kokoro_model)
-        self._model = load_model(self.settings.kokoro_model)
+        resolved = local_hf_model(self.settings.kokoro_model)
+        with contextlib.redirect_stdout(sys.stderr):
+            self._model = load_model(resolved)
         return self._model
 
     def synthesize(
@@ -379,14 +432,15 @@ class KokoroEngine:
         audio_parts: list[np.ndarray] = []
         sample_rate = 24000
         for index, chunk in enumerate(chunks):
-            results = list(
-                model.generate(
-                    chunk,
-                    voice=active_voice,
-                    lang_code=lang_code,
-                    speed=safe_speed,
+            with contextlib.redirect_stdout(sys.stderr):
+                results = list(
+                    model.generate(
+                        chunk,
+                        voice=active_voice,
+                        lang_code=lang_code,
+                        speed=safe_speed,
+                    )
                 )
-            )
             for result in results:
                 samples = getattr(result, "audio", None)
                 if samples is None:
@@ -448,7 +502,9 @@ class Qwen3TTSEngine:
             ) from exc
         model_id = self.settings.resolved_qwen3_model()
         LOG.info("Loading Qwen3-TTS model %s ...", model_id)
-        self._model = load_model(model_id)
+        resolved = local_hf_model(model_id)
+        with contextlib.redirect_stdout(sys.stderr):
+            self._model = load_model(resolved)
         return self._model
 
     def synthesize(
@@ -536,7 +592,8 @@ class Qwen3TTSEngine:
         audio_parts: list[np.ndarray] = []
         sample_rate = 24000
         for index, chunk in enumerate(chunks):
-            results = list(model.generate(chunk, **kwargs))
+            with contextlib.redirect_stdout(sys.stderr):
+                results = list(model.generate(chunk, **kwargs))
             for result in results:
                 samples = getattr(result, "audio", None)
                 if samples is None:
@@ -747,6 +804,20 @@ def _synthesize_with_retries(
     raise last_error
 
 
+def _resolve_audio_override(audio_override: str, base_dir: Path) -> Path:
+    """Resolve a segment audio override inside ``base_dir`` without escaping it."""
+    raw = Path(audio_override)
+    candidate = raw.resolve() if raw.is_absolute() else (base_dir / raw).resolve()
+    resolved_base = base_dir.resolve()
+    if not candidate.is_relative_to(resolved_base):
+        raise RuntimeError(
+            f"Segment audio_override points outside the work directory: {audio_override}"
+        )
+    if not candidate.is_file():
+        raise RuntimeError(f"Segment audio_override file not found: {candidate}")
+    return candidate
+
+
 def synthesize_segments(
     segments: list[NarrationSegment],
     audio_dir: Path,
@@ -756,25 +827,57 @@ def synthesize_segments(
     force: bool = False,
     retries: int = 2,
     shared_dir: Path | None = None,
+    workdir: Path | None = None,
+    start_index: int = 1,
 ) -> list[QualityFlag]:
     """Synthesize each segment, retrying and isolating per-segment failures.
 
-    A failed segment leaves ``audio_path`` empty and is recorded in the returned
-    quality flags; the remaining segments still get synthesized. If every
-    segment fails, the stage raises instead of producing a silent video.
+    Disabled segments are skipped. Segments with ``audio_override`` reuse their
+    imported WAV directly without calling the TTS engine. A failed segment
+    leaves ``audio_path`` empty and is recorded in the returned quality flags;
+    the remaining segments still get synthesized. If every active segment that
+    requires synthesis fails, the stage raises instead of producing a silent
+    video.
     """
     audio_dir.mkdir(parents=True, exist_ok=True)
-    engine = make_engine(settings)
-    if hasattr(engine, "language"):
-        engine.language()
+    base_dir = (workdir or audio_dir.parent).resolve()
+    engine: KokoroEngine | Qwen3TTSEngine | SayEngine | None = None
     voice_key = (
         settings.resolved_voice()
         if settings.tts_engine != "say"
         else (settings.voice.strip() or settings.resolved_say_voice())
     )
     flags: list[QualityFlag] = []
+    attempted = 0
     failed = 0
-    for index, segment in enumerate(segments, start=1):
+    for index, segment in enumerate(segments, start=start_index):
+        if not segment.enabled:
+            segment.audio_path = ""
+            segment.duration = 0.0
+            segment.start = 0.0
+            segment.end = 0.0
+            LOG.info("  [%d/%d] Segment %d disabled; skipping TTS", index, len(segments), segment.id)
+            continue
+        if segment.audio_override:
+            override_path = _resolve_audio_override(segment.audio_override, base_dir)
+            override_duration = _cached_wav_duration(override_path)
+            if override_duration is None:
+                raise RuntimeError(
+                    f"Segment {segment.id} audio_override is not a readable WAV file: {override_path}"
+                )
+            segment.audio_path = str(override_path)
+            segment.duration = override_duration
+            segment.tts_speed = 1.0
+            LOG.info(
+                "  [%d/%d] Using imported audio for segment %d: %.2fs (%s)",
+                index,
+                len(segments),
+                segment.id,
+                override_duration,
+                override_path.name,
+            )
+            continue
+        attempted += 1
         seg_speed = segment.speed if segment.speed > 0 else speed
         seg_voice = segment.voice.strip() or voice_key
         seg_instruct = segment.instruct.strip() or settings.tts_instruct.strip()
@@ -799,6 +902,10 @@ def synthesize_segments(
                 segment.tts_speed = seg_speed
                 LOG.info("  [%d/%d] TTS %s hit: %.2fs", index, len(segments), cache_name, duration)
                 continue
+        if engine is None:
+            engine = make_engine(settings)
+            if hasattr(engine, "language"):
+                engine.language()
         LOG.info("  [%d/%d] Synthesizing: %s", index, len(segments), segment.text[:30])
         try:
             with TemporaryDirectory(prefix=".tts-", dir=audio_dir) as tmp:
@@ -845,9 +952,80 @@ def synthesize_segments(
                 LOG.warning("Could not update the shared TTS cache %s: %s", shared, exc)
         LOG.info("         done in %.2fs", duration)
 
-    if segments and failed == len(segments):
+    if attempted and failed == attempted:
         raise RuntimeError(
-            f"TTS failed for every segment ({failed}/{len(segments)}). "
+            f"TTS failed for every segment ({failed}/{attempted}). "
             f"Check the engine ({settings.tts_engine}) and voice ({voice_key})."
         )
     return flags
+
+
+def preview_voice(
+    voice: str,
+    settings: Settings,
+    *,
+    text: str | None = None,
+    out_wav: Path,
+    explicit_engine: bool = False,
+) -> float:
+    """Synthesize a short sample clip for auditioning a voice."""
+    from ..prompts import text as prompt_text
+
+    qwen3_zh = {name.lower(): name for name in QWEN3_ZH_VOICES}
+    qwen3_en = {name.lower(): name for name in QWEN3_EN_VOICES}
+    resolved_voice = voice.strip()
+    lower_voice = resolved_voice.lower()
+    if lower_voice in qwen3_zh:
+        resolved_voice = qwen3_zh[lower_voice]
+    elif lower_voice in qwen3_en:
+        resolved_voice = qwen3_en[lower_voice]
+
+    preview_settings = Settings(
+        content_language=settings.content_language,
+        tts_engine=settings.tts_engine,
+        tts_language=settings.tts_language,
+        kokoro_model=settings.kokoro_model,
+        qwen3_model=settings.qwen3_model,
+        voice=resolved_voice,
+        tts_speed=settings.tts_speed,
+        tts_instruct=settings.tts_instruct,
+        tts_pitch=settings.tts_pitch,
+        tts_volume=settings.tts_volume,
+        say_voice=resolved_voice if settings.tts_engine == "say" else settings.say_voice,
+    )
+    inferred = voice_language(resolved_voice)
+    if inferred:
+        if not explicit_engine:
+            preview_settings.tts_engine = "kokoro"
+        if not preview_settings.tts_language:
+            preview_settings.tts_language = inferred
+            preview_settings.content_language = inferred.split("-", 1)[0]
+    elif lower_voice in qwen3_zh:
+        if not explicit_engine:
+            preview_settings.tts_engine = "qwen3"
+        preview_settings.content_language = "zh"
+    elif lower_voice in qwen3_en:
+        if not explicit_engine:
+            preview_settings.tts_engine = "qwen3"
+        preview_settings.content_language = "en"
+
+    sample_text = (text or "").strip()
+    if not sample_text:
+        lang = preview_settings.content_language
+        fallback = prompt_text(lang, "script.fallback_intro")
+        sample_text = (
+            fallback
+            if fallback and fallback != "script.fallback_intro"
+            else "Hello, this is a ReachReel voice preview."
+        )
+    engine = make_engine(preview_settings)
+    if hasattr(engine, "language"):
+        engine.language()
+    out_wav.parent.mkdir(parents=True, exist_ok=True)
+    return engine.synthesize(
+        sample_text,
+        out_wav,
+        speed=preview_settings.tts_speed,
+        voice=resolved_voice,
+        instruct=preview_settings.tts_instruct,
+    )

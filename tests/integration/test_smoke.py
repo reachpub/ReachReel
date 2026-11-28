@@ -26,7 +26,7 @@ import unittest
 from pathlib import Path
 
 from reachreel.core.config import Settings
-from reachreel.core.util import atomic_write_json, run
+from reachreel.core.util import atomic_write_json, ffmpeg_bin, find_ffmpeg, find_ffprobe, run
 from reachreel.domain.models import NarrationSegment
 from reachreel.pipeline.orchestrator import Pipeline
 
@@ -78,7 +78,7 @@ def _pick_say_voice() -> str | None:
     sys.platform == "darwin", "the smoke test needs the macOS `say` command"
 )
 @unittest.skipUnless(
-    shutil.which("ffmpeg") and shutil.which("ffprobe") and shutil.which("say"),
+    find_ffmpeg() and find_ffprobe() and shutil.which("say"),
     "ffmpeg, ffprobe, and say are required",
 )
 class StageSmokeTest(unittest.TestCase):
@@ -98,7 +98,7 @@ class StageSmokeTest(unittest.TestCase):
 
         run(
             [
-                "ffmpeg",
+                ffmpeg_bin(),
                 "-hide_banner",
                 "-nostdin",
                 "-loglevel",
@@ -121,7 +121,7 @@ class StageSmokeTest(unittest.TestCase):
         cls.bgm = fixture_dir / "背景 音乐.wav"
         run(
             [
-                "ffmpeg",
+                ffmpeg_bin(),
                 "-hide_banner",
                 "-nostdin",
                 "-loglevel",
@@ -277,7 +277,7 @@ class StageSmokeTest(unittest.TestCase):
     sys.platform == "darwin", "the reuse smoke needs the macOS `say` command"
 )
 @unittest.skipUnless(
-    shutil.which("ffmpeg") and shutil.which("ffprobe") and shutil.which("say"),
+    find_ffmpeg() and find_ffprobe() and shutil.which("say"),
     "ffmpeg, ffprobe, and say are required",
 )
 class OnlyReuseTest(unittest.TestCase):
@@ -296,7 +296,7 @@ class OnlyReuseTest(unittest.TestCase):
 
         run(
             [
-                "ffmpeg",
+                ffmpeg_bin(),
                 "-hide_banner",
                 "-nostdin",
                 "-loglevel",

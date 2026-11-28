@@ -24,7 +24,7 @@ Drop in a raw video clip, optionally add a few words of context (`--brief`) and 
 ### Story & Script
 - **Scene-aware writing**: Understands what happens in each shot (location, subjects, actions, mood) and writes chronological narration instead of generic filler.
 - **Narration and pacing**: Supply background facts and actions with `--brief`, guide the narration's perspective, tone, and focus with `--style`, and control pacing with `--density`. [Character-focused example](docs/en/USER_GUIDE.md#character-focused-narration)
-- **Edit before voiceover**: Run with `--review-script` to pause for review. Read `script.md`, edit the lines in `script.json`, then continue with `reachreel tts <workdir>`.
+- **Edit before voiceover**: Run with `--review-script` to pause for review. Read `script.md`, edit the lines in `script.json`, then continue with `reachreel resume <workdir>`.
 
 ### Voiceover (Chinese & English)
 - **Bilingual narration**: Supports Mandarin Chinese (`zh-CN`), American English (`en-US`), and British English (`en-GB`) via Kokoro-82M on Apple Silicon — offline after first model download.
@@ -44,7 +44,19 @@ Drop in a raw video clip, optionally add a few words of context (`--brief`) and 
 
 ## Quick start
 
-### 1. Environment
+### One-command setup (recommended)
+
+Run the interactive installer on Apple Silicon macOS (checks hardware & RAM, installs `ffmpeg-full`, sets up Python 3.12 + `.venv`, pulls recommended Ollama models with live progress, creates `config.toml` & `inputs/bgm/`, and runs `reachreel doctor`):
+
+```bash
+./install.sh
+# Or non-interactive with smart defaults:
+./install.sh --yes
+```
+
+### Manual setup
+
+#### 1. Environment
 
 - Apple Silicon Mac (M1 or newer)
 - Python 3.11–3.12
@@ -52,7 +64,7 @@ Drop in a raw video clip, optionally add a few words of context (`--brief`) and 
 - 32 GB RAM recommended; 16 GB works with `vlm_workers = 1`
 
 ```bash
-brew install ffmpeg ffmpeg-full
+brew install ffmpeg-full
 
 python3.12 -m venv .venv
 source .venv/bin/activate
@@ -65,7 +77,7 @@ python -m spacy download en_core_web_sm
 ```
 
 > Regular Homebrew `ffmpeg` does not include `libass` for burned-in subtitles.
-> ReachReel automatically prefers `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg`.
+> ReachReel automatically finds both `ffmpeg` and `ffprobe` inside `/opt/homebrew/opt/ffmpeg-full/bin/`.
 
 ### 2. Local models
 
@@ -142,6 +154,27 @@ reachreel export output/my-job --format mov --out output/my-job-prores
 
 ---
 
+## Using with AI harnesses (Codex, Claude Code, etc.)
+
+ReachReel ships an Agent Skill under [`skills/reachreel/`](skills/reachreel/SKILL.md) (following the open `SKILL.md` convention) alongside machine-readable `--json` CLI interfaces (`doctor --json`, `voices --json`, `status <workdir> --json`, `run ... --dry-run --json`, `run ... --json`, `qa <workdir> --json`).
+
+1. Make sure `reachreel` is on your `PATH` (for example via `uv tool install .` or installing into an active environment) and passes `reachreel doctor --json`.
+2. Copy or symlink `skills/reachreel` into your AI harness's skills directory:
+
+```bash
+# OpenAI Codex (user-level; or link to .agents/skills/reachreel in a workspace)
+mkdir -p ~/.codex/skills
+ln -s "$(pwd)/skills/reachreel" ~/.codex/skills/reachreel
+
+# Claude Code
+mkdir -p ~/.claude/skills
+ln -s "$(pwd)/skills/reachreel" ~/.claude/skills/reachreel
+```
+
+Once enabled, the agent can run pre-flight checks, inspect existing work directories with `reachreel status <workdir> --json`, pause at `--review-script` to refine `script.json`, resume downstream stages without rerunning VLM, and inspect `qa --json` results automatically.
+
+---
+
 ## Documentation
 
 | Document | Content |
@@ -191,6 +224,7 @@ reachreel/
 │   ├── pipeline/       # orchestration, caching, QA
 │   └── prompts/        # language-specific prompt packs (zh/, en/)
 ├── inputs/             # local inputs (ignored by Git): bgm/, fonts/, models/
+├── skills/             # Agent Skills bundle for Codex, Claude Code, etc. (skills/reachreel/)
 ├── docs/               # bilingual docs (docs/en/, docs/zh-CN/)
 ├── tests/              # unit and integration tests
 ├── config.example.toml

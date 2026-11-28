@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 
 from reachreel.core.config import Settings
-from reachreel.core.util import run
+from reachreel.core.util import ffmpeg_bin, find_ffmpeg, find_ffprobe, run
 from reachreel.domain.models import Scene
 from reachreel.media.render import output_dimensions
 from reachreel.media.scenes import detect_scenes, extract_frames, probe_video
@@ -40,7 +40,7 @@ def _build_color_clip(path: Path) -> None:
     )
     run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-loglevel",
@@ -65,7 +65,7 @@ def _build_color_clip(path: Path) -> None:
     ENABLED, "set REACHREEL_INTEGRATION=1 to run the scene detection fixtures"
 )
 @unittest.skipUnless(
-    shutil.which("ffmpeg") and shutil.which("ffprobe"),
+    find_ffmpeg() and find_ffprobe(),
     "ffmpeg and ffprobe are required",
 )
 class SceneDetectionTest(unittest.TestCase):
@@ -115,7 +115,7 @@ class SceneDetectionTest(unittest.TestCase):
     ENABLED, "set REACHREEL_INTEGRATION=1 to run the audio-layout fixtures"
 )
 @unittest.skipUnless(
-    shutil.which("ffmpeg") and shutil.which("ffprobe"),
+    find_ffmpeg() and find_ffprobe(),
     "ffmpeg and ffprobe are required",
 )
 class AudioLayoutProbeTest(unittest.TestCase):
@@ -126,7 +126,7 @@ class AudioLayoutProbeTest(unittest.TestCase):
         cls.tmp = Path(tempfile.mkdtemp(prefix="reachreel-audio-"))
         video = ["-f", "lavfi", "-i", "testsrc2=size=160x90:rate=12:duration=1"]
         common = [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-loglevel",
@@ -200,7 +200,7 @@ class AudioLayoutProbeTest(unittest.TestCase):
     ENABLED, "set REACHREEL_INTEGRATION=1 to run the keyframe dedup fixtures"
 )
 @unittest.skipUnless(
-    shutil.which("ffmpeg") and shutil.which("ffprobe"),
+    find_ffmpeg() and find_ffprobe(),
     "ffmpeg and ffprobe are required",
 )
 class FrameDedupTest(unittest.TestCase):
@@ -220,7 +220,7 @@ class FrameDedupTest(unittest.TestCase):
         cls.static = cls.tmp / "static.mp4"
         run(
             [
-                "ffmpeg",
+                ffmpeg_bin(),
                 "-hide_banner",
                 "-nostdin",
                 "-loglevel",
@@ -237,7 +237,7 @@ class FrameDedupTest(unittest.TestCase):
         cls.moving = cls.tmp / "moving.mp4"
         run(
             [
-                "ffmpeg",
+                ffmpeg_bin(),
                 "-hide_banner",
                 "-nostdin",
                 "-loglevel",
@@ -280,7 +280,7 @@ class FrameDedupTest(unittest.TestCase):
     ENABLED, "set REACHREEL_INTEGRATION=1 to run the rotation fixtures"
 )
 @unittest.skipUnless(
-    shutil.which("ffmpeg") and shutil.which("ffprobe"),
+    find_ffmpeg() and find_ffprobe(),
     "ffmpeg and ffprobe are required",
 )
 class RotationProbeTest(unittest.TestCase):
@@ -292,7 +292,7 @@ class RotationProbeTest(unittest.TestCase):
         cls.base = cls.tmp / "base.mp4"
         run(
             [
-                "ffmpeg",
+                ffmpeg_bin(),
                 "-hide_banner",
                 "-nostdin",
                 "-loglevel",
@@ -316,7 +316,7 @@ class RotationProbeTest(unittest.TestCase):
             out = cls.tmp / f"rot{degrees}.mp4"
             run(
                 [
-                    "ffmpeg",
+                    ffmpeg_bin(),
                     "-hide_banner",
                     "-nostdin",
                     "-loglevel",

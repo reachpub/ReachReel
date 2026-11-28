@@ -9,6 +9,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import unicodedata
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -19,6 +20,14 @@ from ..i18n import t
 
 LOG = logging.getLogger("reachreel")
 
+_NOISY_LOGGERS = (
+    "httpx",
+    "httpcore",
+    "huggingface_hub",
+    "urllib3",
+    "jieba",
+)
+
 
 def setup_logging(verbose: bool = False) -> None:
     level = logging.DEBUG if verbose else logging.INFO
@@ -28,6 +37,48 @@ def setup_logging(verbose: bool = False) -> None:
         datefmt="%H:%M:%S",
         stream=sys.stderr,
     )
+    if not verbose:
+        for name in _NOISY_LOGGERS:
+            logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def display_width(text: str) -> int:
+    """Estimate terminal display width, accounting for wide East Asian characters."""
+    width = 0
+    for ch in text:
+        width += 2 if unicodedata.east_asian_width(ch) in {"W", "F"} else 1
+    return width
+
+
+def pad_display(text: str, width: int) -> str:
+    """Right-pad ``text`` to ``width`` terminal columns."""
+    pad = max(0, width - display_width(text))
+    return text + (" " * pad)
+
+
+def local_hf_model(repo_or_path: str) -> str:
+    """Return a cached local HuggingFace snapshot directory when available.
+
+    This keeps repeated runs offline once a model has been downloaded, without
+    blocking initial downloads when the snapshot is not cached yet.
+    """
+    raw = (repo_or_path or "").strip()
+    if not raw:
+        return raw
+    candidate = Path(raw).expanduser()
+    if candidate.exists():
+        return str(candidate)
+    if "/" not in raw:
+        return raw
+    try:
+        from huggingface_hub import snapshot_download
+
+        cached = snapshot_download(raw, local_files_only=True)
+        if cached and Path(cached).is_dir():
+            return str(cached)
+    except Exception as exc:  # noqa: BLE001 - fall back to online fetch on cache miss
+        LOG.debug("Local HuggingFace snapshot unavailable for %s: %s", raw, exc)
+    return raw
 
 
 def run(
@@ -72,10 +123,49 @@ def run(
     return proc
 
 
+def find_ffmpeg() -> str | None:
+    """Locate an installed ffmpeg binary, checking keg-only ffmpeg-full first."""
+    candidates = [
+        os.environ.get("FFMPEG_FULL"),
+        "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+        "/usr/local/opt/ffmpeg-full/bin/ffmpeg",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return str(candidate)
+    return shutil.which("ffmpeg")
+
+
+def find_ffprobe() -> str | None:
+    """Locate an installed ffprobe binary, checking beside ffmpeg-full first."""
+    candidates: list[str | None] = []
+    env_full = os.environ.get("FFMPEG_FULL")
+    if env_full:
+        candidates.append(str(Path(env_full).parent / "ffprobe"))
+    candidates.extend([
+        "/opt/homebrew/opt/ffmpeg-full/bin/ffprobe",
+        "/usr/local/opt/ffmpeg-full/bin/ffprobe",
+    ])
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return str(candidate)
+    return shutil.which("ffprobe")
+
+
+def ffmpeg_bin() -> str:
+    """Return the best available ffmpeg executable path, or ``'ffmpeg'`` as fallback."""
+    return find_ffmpeg() or "ffmpeg"
+
+
+def ffprobe_bin() -> str:
+    """Return the best available ffprobe executable path, or ``'ffprobe'`` as fallback."""
+    return find_ffprobe() or "ffprobe"
+
+
 def ffprobe_json(path: Path) -> dict[str, Any]:
     proc = run(
         [
-            "ffprobe",
+            ffprobe_bin(),
             "-v",
             "error",
             "-print_format",
@@ -89,9 +179,10 @@ def ffprobe_json(path: Path) -> dict[str, Any]:
     return json.loads(proc.stdout)
 
 
-def ffmpeg_filters(ffmpeg: str = "ffmpeg") -> set[str]:
+def ffmpeg_filters(ffmpeg: str | None = None) -> set[str]:
+    binary = ffmpeg or ffmpeg_bin()
     try:
-        proc = run([ffmpeg, "-hide_banner", "-filters"], capture=True)
+        proc = run([binary, "-hide_banner", "-filters"], capture=True)
     except RuntimeError:
         return set()
     names: set[str] = set()

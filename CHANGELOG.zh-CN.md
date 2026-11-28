@@ -2,6 +2,29 @@
 
 # 变更记录
 
+## [Unreleased]
+
+### 新增
+
+- 新增本地可视化微调面板服务 `reachreel serve [workdir] [--port 8760] [--open]`，提供深色交互时间轴（旁白段横向拖动锁定入点、源片硬切切分与删除、镜头缩略图跳转）、视频实时字幕叠加预览、单段即点试听与音频上传替换、SRT/混音/导入/导出检视器、`.history/` 撤销、HTTP Range 拖动播放、会话 Token 鉴权以及 SSE 实时日志，底层 100% 复用 `Pipeline`。
+- 新增命令行精细微调命令 `reachreel tune <workdir>`，支持单段旁白微调（文本、音色、语速、语气指令、锁定出现时间 `start_override`、单段增益 `gain_db`、`--enable`/`--disable`、`--clear-audio-override`）、轻量非破坏性源片硬切裁剪 `cuts.json`（`--cut`/`--keep`/`--reset-cuts`）以及 `.history/` 快照撤销（`--undo`）；同步为 `reachreel resume` 补齐 `--subtitle-*` 全局字幕布局覆盖选项。
+- 新增 `reachreel import <workdir>`，支持校验并导回外部修改的脚本（`script.json`/`script.md`）、SRT 字幕、整轨或单段配音音频（`--narration`、`--segment-audio ID=PATH`）、替换 BGM、`cuts.json`，以及从 Premiere / DaVinci Resolve / Final Cut Pro 导回的 FCP7 XML / FCPXML 时间线（`--timeline`）；配套为 `reachreel export` 新增 `--narration-mode segments` 按段导出模式。
+- 新增交互式自动安装与初始化脚本 `install.sh`，包含 `ReachReel` ASCII 字符图形、步骤进度条、动态加载指示、按本机内存推荐 Ollama 模型档位、自动生成初始 `config.toml` 并执行 `reachreel doctor` 自检。
+- 新增 `reachreel resume <workdir>` 一键续跑命令，无需重复输入源视频路径即可自动补跑所有缺失或过期阶段；`status` 同步输出 `pending_stages` 与 `resume_command`。
+- 增强 `reachreel voices`，展示各内置音色的性别与风格特征，并新增 `--preview <音色名>` 一键生成并试听样音。
+- 升级 `reachreel export` 剪辑素材包，自动导出独立 `bgm.wav` 与 `ambient.wav` 音轨干声，在 `timeline.xml` / `timeline.fcpxml` 中加入多音轨与镜头切点标记（Markers），并新增 `--force` 覆盖与 `--json` 输出。
+- 为 `reachreel run --help` 按功能分组展示参数，为所有子命令补齐 `--json` 支持；为 `run` 补齐 `--crf`，为 `tts` 补齐 `--max-speedup`，为 `run` / `resume` / `mix` 补齐混音调参选项（`--bgm-volume`、`--bgm-duck-db`、`--ambient-volume`、`--ambient-duck-db`、`--target-lufs`）。
+- 新增 `reachreel status <workdir> [--json]` 命令，检查已有工作目录的各阶段状态（`ok` / `stale` / `missing`）、脚本是否手动修改、现有产物路径、QA 状态、`quality_flags` 以及下一步可执行命令。
+- 为 `reachreel run` 新增 `--json` 选项，支持以纯 JSON 输出执行计划（`--dry-run --json`）或执行摘要（含 `workdir`、产物清单、QA 报告与 `next_command`），避免人类可读的 QA 表格混入标准输出。
+- 新增位于 `skills/reachreel/` 的 Agent Skill 包（`SKILL.md` 及 `references/`），便于在 OpenAI Codex、Claude Code 等支持 Agent Skills 规范的 AI harness 中调用 ReachReel。
+
+### 修复
+
+- 在 `--json` 模式与本地模型调用期间隔离标准输出，防止 Kokoro 等第三方库打印污染 JSON；修复 `run --only ...,render,qa` 将 `output` 设为 `qa.json` 的问题，确保返回 `final.mp4`。
+- 统一 `ffmpeg` 与 `ffprobe` 探测逻辑（`ffmpeg_bin()` / `ffprobe_bin()`），自动复用 Homebrew keg-only 的 `ffmpeg-full/bin`，并在 `reachreel doctor` 中增加可执行修复提示与中英文列宽对齐。
+- 修复工作目录移动或重命名后 `reachreel qa` 因旧绝对路径失败的问题；允许 `script`、`tts`、`subtitle` 在源视频已移走但元数据已保存时继续执行。
+- 允许 `--lang`、`--verbose`、`--cache-dir`、`--no-cache` 等全局选项放在子命令之后；优先加载本地已缓存的 HuggingFace 模型快照以实现真正离线运行；为 `licenses` 与 `qa` 补充工作目录存在性校验，并消除 `--review-script` 估算阶段的误导性加速日志。
+
 ## [0.5.0] - 2026-11-27
 
 > 尚未发布。

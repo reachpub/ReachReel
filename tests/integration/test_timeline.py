@@ -16,7 +16,7 @@ import wave
 from pathlib import Path
 
 from reachreel.core.config import Settings
-from reachreel.core.util import sha1_file
+from reachreel.core.util import find_ffmpeg, sha1_file
 from reachreel.domain.models import NarrationSegment, Scene
 from reachreel.domain.timeline import place_segments
 
@@ -49,7 +49,7 @@ def _wav_duration(path: Path) -> float:
 @unittest.skipUnless(
     ENABLED, "set REACHREEL_INTEGRATION=1 to run the timeline speed-up test"
 )
-@unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
+@unittest.skipUnless(find_ffmpeg(), "ffmpeg is required")
 class NarrationSpeedUpTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="reachreel-timeline-"))

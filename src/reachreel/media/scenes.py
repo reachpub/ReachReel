@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from pathlib import Path
 
-from ..core.util import atomic_write_json, run
+from ..core.util import atomic_write_json, ffmpeg_bin, run
 from ..domain.models import Scene, VideoInfo
 
 LOG = logging.getLogger("reachreel.media.scenes")
@@ -76,7 +76,7 @@ def _detect_cuts(path: Path, threshold: float) -> list[float]:
     expr = f"select='gt(scene,{threshold})',showinfo"
     proc = run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-i",
@@ -161,7 +161,7 @@ def detect_scenes(
 def _grab_frame(video: Path, time_s: float, out: Path, width: int) -> bool:
     proc = run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-loglevel",
@@ -220,7 +220,7 @@ def _frame_signature(path: Path, size: int = 16) -> bytes | None:
     """Downscale a JPEG to a ``size``x``size`` grayscale thumbnail."""
     proc = subprocess.run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-loglevel",

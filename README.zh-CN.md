@@ -24,7 +24,7 @@
 ### 看片与写稿
 - **按镜头理解画面**：逐镜头识别地点、人物主体、动作、细节与氛围，按时间顺序写出贴合画面的旁白，而不是空泛套话。
 - **旁白与节奏**：用 `--brief` 补充背景事实和人物行为，用 `--style` 指定叙述视角、口吻和重点，用 `--density` 调节旁白疏密。[人物解说示例](docs/zh-CN/USER_GUIDE.md#character-focused-narration)
-- **配音前先审稿**：加上 `--review-script` 会暂停供审校。阅读 `script.md`，把修改写入 `script.json`，再执行 `reachreel tts <workdir>`。
+- **配音前先审稿**：加上 `--review-script` 会暂停供审校。阅读 `script.md`，把修改写入 `script.json`，再执行 `reachreel resume <workdir>` 一键完成后续阶段。
 
 ### 语音配音（中文与英文）
 - **中英双语本地配音**：基于 Apple Silicon 的 Kokoro-82M (MLX)，支持普通话（`zh-CN`）、美式英语（`en-US`）与英式英语（`en-GB`），首次下载模型后可完全离线运行。
@@ -44,7 +44,19 @@
 
 ## 快速开始
 
-### 1. 环境
+### 一键自动安装与初始化（推荐）
+
+在 Apple Silicon Mac 上运行交互式安装脚本（自动检测芯片与内存、安装 `ffmpeg-full`、配置 Python 3.12 与 `.venv`、带实时进度下载推荐 Ollama 模型、生成 `config.toml` 与 `inputs/bgm/` 并执行 `reachreel doctor`）：
+
+```bash
+./install.sh
+# 或按推荐配置静默安装：
+./install.sh --yes
+```
+
+### 手动安装
+
+#### 1. 环境
 
 - Apple Silicon Mac（M1 及以上）
 - Python 3.11 – 3.12
@@ -52,7 +64,7 @@
 - 建议 32 GB 内存以上；16 GB 也能跑，可把 `vlm_workers` 设为 1
 
 ```bash
-brew install ffmpeg ffmpeg-full
+brew install ffmpeg-full
 
 python3.12 -m venv .venv
 source .venv/bin/activate
@@ -65,7 +77,7 @@ python -m spacy download en_core_web_sm
 ```
 
 > Homebrew 的普通 `ffmpeg` 没有 `libass`，无法烧录硬字幕。
-> ReachReel 会自动优先使用 `/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg`。
+> ReachReel 会自动探测 `/opt/homebrew/opt/ffmpeg-full/bin/` 中的 `ffmpeg` 与 `ffprobe`。
 
 ### 2. 本地模型
 
@@ -142,6 +154,27 @@ reachreel export output/my-job --format mov --out output/my-job-prores
 
 ---
 
+## 给 AI Harness 使用（Codex、Claude Code 等）
+
+仓库自带面向 AI Agent 的 Skill 包（[`skills/reachreel/`](skills/reachreel/SKILL.md)，遵循通用的 `SKILL.md` 规范），并配套了机器可读的 `--json` CLI 接口（`doctor --json`、`voices --json`、`status <workdir> --json`、`run ... --dry-run --json`、`run ... --json`、`qa <workdir> --json`）。
+
+1. 确保 `reachreel` 已在 `PATH` 中可全局调用（例如通过 `uv tool install .` 或在已激活环境中安装），且 `reachreel doctor --json` 检查通过。
+2. 将 `skills/reachreel` 复制或软链接到对应 AI harness 的 skills 目录：
+
+```bash
+# OpenAI Codex（用户级；也可在工作区内链接到 .agents/skills/reachreel）
+mkdir -p ~/.codex/skills
+ln -s "$(pwd)/skills/reachreel" ~/.codex/skills/reachreel
+
+# Claude Code
+mkdir -p ~/.claude/skills
+ln -s "$(pwd)/skills/reachreel" ~/.claude/skills/reachreel
+```
+
+启用后，Agent 可以自动完成环境预检、用 `reachreel status <workdir> --json` 接续已有任务、通过 `--review-script` 暂停并精修 `script.json` 后跳过 VLM 续跑下游阶段，以及根据 `qa --json` 结果针对性修复返工。
+
+---
+
 ## 文档
 
 | 文档 | 内容 |
@@ -191,6 +224,7 @@ reachreel/
 │   ├── pipeline/       # 流水线编排、缓存、QA
 │   └── prompts/        # 按语言拆分的提示词包（zh/、en/）
 ├── inputs/             # 本地输入（被 Git 忽略）：bgm/、fonts/、models/
+├── skills/             # 面向 Codex、Claude Code 等的 Agent Skills 包（skills/reachreel/）
 ├── docs/               # 双语文档（docs/en/、docs/zh-CN/）
 ├── tests/              # 单元测试与集成测试
 ├── config.example.toml

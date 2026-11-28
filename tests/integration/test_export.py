@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 import tempfile
 import unittest
@@ -10,21 +9,29 @@ import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
 
-from reachreel.core.util import atomic_write_json, ffprobe_json, read_json, run
+from reachreel.core.util import (
+    atomic_write_json,
+    ffmpeg_bin,
+    ffprobe_json,
+    find_ffmpeg,
+    find_ffprobe,
+    read_json,
+    run,
+)
 
 
 @unittest.skipUnless(os.environ.get("REACHREEL_INTEGRATION") == "1", "set REACHREEL_INTEGRATION=1")
-@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
+@unittest.skipUnless(find_ffmpeg() and find_ffprobe(), "FFmpeg is required")
 class EditExportTest(unittest.TestCase):
     def frame_rate_fixture(self, workdir: Path, output_fps: float) -> list[str | Path]:
         source = workdir / "source.mp4"
         run(
-            ["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+            [ffmpeg_bin(), "-v", "error", "-f", "lavfi", "-i",
              "testsrc2=size=160x90:rate=60:duration=3", "-c:v", "libx264", source],
             timeout=30,
         )
         run(
-            ["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+            [ffmpeg_bin(), "-v", "error", "-f", "lavfi", "-i",
              "sine=sample_rate=48000:duration=4", "-c:a", "pcm_s16le",
              workdir / "narration.wav"],
             timeout=30,
@@ -77,19 +84,19 @@ class EditExportTest(unittest.TestCase):
             workdir.mkdir()
             source = workdir / "source.mkv"
             run(
-                ["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                [ffmpeg_bin(), "-v", "error", "-f", "lavfi", "-i",
                  "testsrc2=size=160x90:rate=30000/1001:duration=1", "-f", "lavfi", "-i",
                  "sine=duration=1", "-vf", "setsar=4/3", "-c:v", "libx264", "-c:a", "aac", source],
                 timeout=30,
             )
             run(
-                ["ffmpeg", "-v", "error", "-f", "lavfi", "-i",
+                [ffmpeg_bin(), "-v", "error", "-f", "lavfi", "-i",
                  "sine=sample_rate=48000:duration=1.5", "-c:a", "pcm_s16le",
                  workdir / "narration.wav"],
                 timeout=30,
             )
             run(
-                ["ffmpeg", "-v", "error", "-i", workdir / "narration.wav", "-ac", "2",
+                [ffmpeg_bin(), "-v", "error", "-i", workdir / "narration.wav", "-ac", "2",
                  workdir / "mix.wav"],
                 timeout=30,
             )

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core.config import Settings, normalize_subtitle_render
-from ..core.util import srt_timestamp
+from ..core.util import local_hf_model, srt_timestamp
 from ..domain.models import Cue, NarrationSegment, QualityFlag
 from ..languages import resolve_asr_language
 
@@ -302,11 +302,11 @@ def read_srt(path: Path) -> list[Cue]:
     """Minimal SRT reader used to build ASS from an existing subtitle file."""
     if not path.exists():
         return []
-    text = path.read_text(encoding="utf-8", errors="replace").strip()
+    text = path.read_text(encoding="utf-8-sig", errors="replace").strip()
     if not text:
         return []
     cues: list[Cue] = []
-    for block in re.split(r"\n\s*\n", text):
+    for block in re.split(r"\r?\n\s*\r?\n", text):
         lines = [line.rstrip() for line in block.splitlines() if line.strip()]
         if len(lines) < 2:
             continue
@@ -325,6 +325,34 @@ def read_srt(path: Path) -> list[Cue]:
             )
         )
     return cues
+
+
+def validate_srt(path: Path) -> tuple[list[Cue], list[str]]:
+    """Parse and validate an external SRT subtitle file before importing it.
+
+    Returns ``(cues, warnings)`` and raises ``ValueError`` if the file has no
+    valid cues or contains invalid cue timestamps.
+    """
+    if not path.is_file():
+        raise ValueError(f"Subtitle file not found: {path}")
+    raw = path.read_text(encoding="utf-8-sig", errors="replace").strip()
+    if not raw:
+        raise ValueError(f"Subtitle file is empty: {path}")
+    cues = read_srt(path)
+    if not cues:
+        raise ValueError(f"No valid SRT cues found in: {path}")
+    warnings: list[str] = []
+    overlaps = 0
+    for idx, cue in enumerate(cues, start=1):
+        if cue.end <= cue.start:
+            raise ValueError(
+                f"Invalid cue #{idx} in {path.name}: end ({cue.end:.3f}s) <= start ({cue.start:.3f}s)"
+            )
+        if idx > 1 and cue.start < cues[idx - 2].end - 0.01:
+            overlaps += 1
+    if overlaps:
+        warnings.append(f"Imported SRT has {overlaps} overlapping cue(s).")
+    return cues, warnings
 
 
 def ass_timestamp(seconds: float) -> str:
@@ -453,13 +481,14 @@ def transcribe_with_mlx_whisper(
         LOG.warning("mlx-whisper is not installed; using the TTS timeline for subtitles")
         return None
     LOG.info("Transcribing narration with mlx-whisper (%s)...", model)
+    resolved_model = local_hf_model(model)
     attempts = max(1, retries + 1)
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
             return mlx_whisper.transcribe(
                 str(audio_path),
-                path_or_hf_repo=model,
+                path_or_hf_repo=resolved_model,
                 language=language,
                 word_timestamps=True,
                 condition_on_previous_text=False,
@@ -518,6 +547,7 @@ def build_subtitles(
     asr_engine: str = "mlx-whisper",
     flags: list[QualityFlag] | None = None,
 ) -> list[Cue]:
+    segments = [segment for segment in segments if segment.enabled]
     max_chars = settings.resolved_subtitle_max_chars()
     result = None
     if asr_engine != "none":

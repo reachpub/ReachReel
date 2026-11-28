@@ -312,7 +312,11 @@ def generate_script(
         style=resolved_style,
         style_guidance=style_guidance,
     )
-    LOG.info("Writing narration with the local LLM (target about %d characters)...", target_chars)
+    LOG.info(
+        "Writing narration with the local LLM (%s, target about %d characters); first request may take a moment while the model loads...",
+        getattr(client, "model", "ollama"),
+        target_chars,
+    )
     raw = client.chat(
         [{"role": "user", "content": prompt}],
         temperature=temperature,

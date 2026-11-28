@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from ..core.config import Settings
-from ..core.util import run
+from ..core.util import ffmpeg_bin, run
+from ..domain.cuts import CutList
 from ..i18n import t
 
 LOG = logging.getLogger("reachreel.media.audio")
@@ -91,7 +92,7 @@ def pick_bgm(settings: Settings) -> Path | None:
 def prepare_bgm_loop(bgm: Path, duration: float, out_wav: Path) -> None:
     run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-loglevel",
@@ -153,7 +154,7 @@ def _measure_loudness(
     ]
     proc = run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-loglevel",
@@ -193,12 +194,84 @@ def _bgm_filter(settings: Settings, duration: float, input_index: int = 2) -> st
     )
 
 
+def normalize_audio_wav(
+    src: Path,
+    dst: Path,
+    *,
+    channels: int = 1,
+    sample_rate: int = 48000,
+) -> float:
+    """Decode any FFmpeg-supported audio file into 16-bit PCM WAV and return its duration."""
+    import wave
+    from tempfile import TemporaryDirectory
+
+    if not src.is_file():
+        raise ValueError(f"Audio file not found: {src}")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".reachreel-audio-", dir=dst.parent) as tmp:
+        staged = Path(tmp) / dst.name
+        run(
+            [
+                ffmpeg_bin(),
+                "-hide_banner",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(src),
+                "-vn",
+                "-ar",
+                str(sample_rate),
+                "-ac",
+                str(channels),
+                "-c:a",
+                "pcm_s16le",
+                str(staged),
+            ],
+            timeout=300,
+        )
+        try:
+            with wave.open(str(staged), "rb") as fh:
+                frames = fh.getnframes()
+                rate = fh.getframerate()
+                duration = frames / float(rate) if rate else 0.0
+        except (OSError, wave.Error, EOFError) as exc:
+            raise ValueError(f"Normalized audio is not a valid WAV file: {src}") from exc
+        if duration <= 0.01:
+            raise ValueError(f"Imported audio is empty or too short: {src}")
+        staged.replace(dst)
+    return round(duration, 3)
+
+
+def _ambient_cut_filters(cuts: CutList) -> list[str]:
+    """Build FFmpeg audio trim/concat filters mapping ``[0:a]`` to ``[amb_src]``."""
+    if len(cuts.clips) == 1:
+        clip = cuts.clips[0]
+        return [
+            f"[0:a]atrim=start={clip.start:.3f}:end={clip.end:.3f},asetpts=PTS-STARTPTS[amb_src]"
+        ]
+    count = len(cuts.clips)
+    splits = "".join(f"[amb_s{idx}]" for idx in range(count))
+    parts = [f"[0:a]asplit={count}{splits}"]
+    concat_inputs: list[str] = []
+    for idx, clip in enumerate(cuts.clips):
+        parts.append(
+            f"[amb_s{idx}]atrim=start={clip.start:.3f}:end={clip.end:.3f},"
+            f"asetpts=PTS-STARTPTS[amb_c{idx}]"
+        )
+        concat_inputs.append(f"[amb_c{idx}]")
+    parts.append(f"{''.join(concat_inputs)}concat=n={count}:v=0:a=1[amb_src]")
+    return parts
+
+
 def mix_filter_graph(
     *,
     duration: float,
     has_ambient: bool,
     has_bgm: bool,
     settings: Settings,
+    cuts: CutList | None = None,
 ) -> list[str]:
     """Return the ``filter_complex`` parts that produce ``[premix]``.
 
@@ -223,8 +296,12 @@ def mix_filter_graph(
     bgm_ratio = max(2.0, min(20.0, abs(settings.bgm_duck_db) / 2.0))
     ambient_ratio = max(2.0, min(20.0, abs(settings.ambient_duck_db) / 2.0))
     if use_ambient:
+        amb_in = "[0:a]"
+        if cuts is not None and cuts.clips:
+            filters.extend(_ambient_cut_filters(cuts))
+            amb_in = "[amb_src]"
         filters.append(
-            f"[0:a]aformat=sample_rates=48000:channel_layouts=stereo,"
+            f"{amb_in}aformat=sample_rates=48000:channel_layouts=stereo,"
             f"volume={settings.ambient_volume:.3f}[amb]"
         )
         filters.append(
@@ -260,6 +337,7 @@ def mix_audio(
     duration: float,
     has_ambient: bool,
     settings: Settings,
+    cuts: CutList | None = None,
 ) -> None:
     inputs = ["-i", str(video), "-i", str(narration_wav)]
     if bgm_wav:
@@ -270,6 +348,7 @@ def mix_audio(
         has_ambient=has_ambient,
         has_bgm=bgm_wav is not None,
         settings=settings,
+        cuts=cuts,
     )
 
     measured = None
@@ -283,7 +362,7 @@ def mix_audio(
     out_wav.parent.mkdir(parents=True, exist_ok=True)
     run(
         [
-            "ffmpeg",
+            ffmpeg_bin(),
             "-hide_banner",
             "-nostdin",
             "-loglevel",
